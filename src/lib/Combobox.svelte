@@ -331,7 +331,6 @@
               aria-selected={isAny}
               onclick={selectAny}
             >
-              <span class="bar" aria-hidden="true"></span>
               <span class="aster" aria-hidden="true">∗</span>
               <span class="otext">{placeholder}: {anyLabel} <span class="raw">(clear filter)</span></span>
               <span class="dot" aria-hidden="true"></span>

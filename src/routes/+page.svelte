@@ -116,7 +116,7 @@
       <div class="secthdr" style="border-top: none;">
         Never fetched <span class="badge">{q.neverFetched.length}</span>
         <span class="grow"></span>
-        <button class="btn primary sm" disabled title="Fetch arrives in a later phase">⟳ Fetch all due</button>
+        <button class="btn primary sm" disabled title="Fetch arrives in a later phase">Fetch all due</button>
       </div>
       {@render qrowsFresh(q.neverFetched)}
       <div class="secthdr">
@@ -173,7 +173,7 @@
         {:else}
           <span class="sub">never checked</span>
         {/if}
-        <button class="btn primary sm" disabled title="Fetch arrives in a later phase">Fetch jobs →</button>
+        <button class="btn primary sm" disabled title="Fetch arrives in a later phase">Fetch jobs</button>
       </li>
     {/each}
   </ul>
