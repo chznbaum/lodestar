@@ -6,6 +6,8 @@ export interface Filters {
   status?: string;
   industry?: string; // matches any domain
   remote?: string;
+  size?: string;
+  stage?: string;
   due?: boolean;
 }
 
@@ -38,12 +40,17 @@ const STAGE_ORDER = [
   "unknown",
 ];
 
+function rank(value: string | null, order: string[]): number {
+  const i = order.indexOf(value ?? "");
+  return i === -1 ? order.length : i;
+}
+
 function cmp(a: Company, b: Company, key: SortKey): number {
   switch (key) {
     case "company_size":
-      return SIZE_ORDER.indexOf(a.company_size ?? "") - SIZE_ORDER.indexOf(b.company_size ?? "");
+      return rank(a.company_size, SIZE_ORDER) - rank(b.company_size, SIZE_ORDER);
     case "stage":
-      return STAGE_ORDER.indexOf(a.stage ?? "") - STAGE_ORDER.indexOf(b.stage ?? "");
+      return rank(a.stage, STAGE_ORDER) - rank(b.stage, STAGE_ORDER);
     case "last_checked":
       return (a.last_checked ?? "").localeCompare(b.last_checked ?? "");
     default:
@@ -59,6 +66,8 @@ export function applyView(companies: Company[], opts: ViewOptions): ViewResult {
     if (f.status && c.status !== f.status) return false;
     if (f.industry && !c.domain.includes(f.industry)) return false;
     if (f.remote && c.remote_policy !== f.remote) return false;
+    if (f.size && c.company_size !== f.size) return false;
+    if (f.stage && c.stage !== f.stage) return false;
     if (f.due && !c.due_for_check) return false;
     return true;
   });
@@ -72,14 +81,28 @@ export function applyView(companies: Company[], opts: ViewOptions): ViewResult {
 
   const byKey = new Map<string, Company[]>();
   for (const c of rows) {
-    const k = c.domain[0] ?? "(uncategorized)";
-    if (!byKey.has(k)) byKey.set(k, []);
-    byKey.get(k)!.push(c);
+    const keys = c.domain.length ? c.domain : ["(uncategorized)"];
+    for (const k of keys) {
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k)!.push(c);
+    }
   }
   const groups = [...byKey.entries()]
     .map(([key, items]) => ({ key, items }))
     .sort((a, b) => a.key.localeCompare(b.key));
   return { flat: rows, groups };
+}
+
+/** Split companies into the action-queue sections (both are subsets of `due_for_check`). */
+export function queueSections(companies: Company[]): {
+  neverFetched: Company[];
+  staleChecked: Company[];
+} {
+  const due = companies.filter((c) => c.due_for_check);
+  return {
+    neverFetched: due.filter((c) => !c.last_checked),
+    staleChecked: due.filter((c) => !!c.last_checked),
+  };
 }
 
 /** Distinct sorted values for building filter dropdowns. */
