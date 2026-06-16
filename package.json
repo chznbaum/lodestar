@@ -14,6 +14,10 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@fontsource-variable/bodoni-moda": "^5.2.7",
+    "@fontsource/bodoni-moda": "^5.2.7",
+    "@fontsource/lora": "^5.2.8",
+    "@fontsource/spline-sans": "^5.2.8",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",

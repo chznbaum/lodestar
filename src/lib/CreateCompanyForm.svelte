@@ -1,6 +1,8 @@
 <script lang="ts">
   import { companiesStore as cs } from "$lib/companies.svelte";
   import type { NewCompany } from "$lib/vault";
+  import Combobox from "$lib/Combobox.svelte";
+  import { humanize } from "$lib/labels";
 
   let { onclose, oncreated }: { onclose: () => void; oncreated: (slug: string) => void } = $props();
 
@@ -20,6 +22,10 @@
   const SIZES = ["", "startup", "scaleup", "mid_market", "enterprise"];
   const STAGES = ["", "pre_seed", "seed", "series_a", "series_b", "series_c_plus", "public", "bootstrapped", "unknown"];
   const REMOTES = ["", "fully_remote", "remote_first", "hybrid", "onsite", "unknown"];
+
+  const sizeOpts = SIZES.filter(Boolean).map((s) => ({ label: humanize(s), value: s }));
+  const stageOpts = STAGES.filter(Boolean).map((s) => ({ label: humanize(s), value: s }));
+  const remoteOpts = REMOTES.filter(Boolean).map((r) => ({ label: humanize(r), value: r }));
 
   function splitList(s: string): string[] {
     return s.split(",").map((x) => x.trim()).filter(Boolean);
@@ -65,27 +71,26 @@
   <label>Careers URL<input bind:value={careers_url} placeholder="https://…/careers" /></label>
   <label>Domain(s)<input bind:value={domain} placeholder="financial_services, ai" /></label>
   <label>Business model(s)<input bind:value={business_model} placeholder="b2b" /></label>
-  <label>Size<select bind:value={company_size}>{#each SIZES as s}<option value={s}>{s || "—"}</option>{/each}</select></label>
-  <label>Stage<select bind:value={stage}>{#each STAGES as s}<option value={s}>{s || "—"}</option>{/each}</select></label>
-  <label>Remote<select bind:value={remote_policy}>{#each REMOTES as r}<option value={r}>{r || "—"}</option>{/each}</select></label>
+  <div class="field"><span class="flabel">Size</span><Combobox placeholder="Size" bind:value={company_size} options={sizeOpts} /></div>
+  <div class="field"><span class="flabel">Stage</span><Combobox placeholder="Stage" bind:value={stage} options={stageOpts} /></div>
+  <div class="field"><span class="flabel">Remote</span><Combobox placeholder="Remote" bind:value={remote_policy} options={remoteOpts} /></div>
   <label>Location<input bind:value={location} placeholder="Remote, US" /></label>
   <label>Notes<textarea bind:value={notes} placeholder="Why listed…"></textarea></label>
   <div class="actions">
-    <button onclick={onclose}>Cancel</button>
-    <button class="primary" disabled={saving} onclick={submit}>{saving ? "Creating…" : "Create"}</button>
+    <button class="btn" onclick={onclose}>Cancel</button>
+    <button class="btn primary" disabled={saving} onclick={submit}>{saving ? "Creating…" : "Create"}</button>
   </div>
 </div>
 
 <style>
   .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.25); }
-  .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(32rem, 92vw); max-height: 88vh; overflow-y: auto; background: #fff; border-radius: 12px; padding: 1.25rem 1.5rem; box-shadow: 0 12px 40px rgba(0,0,0,.2); }
-  h2 { margin: 0 0 .25rem; font-size: 1.1rem; }
-  .hint { color: #777; font-size: .8rem; margin: 0 0 .75rem; }
-  label { display: block; font-size: .8rem; color: #555; margin-bottom: .55rem; }
-  input, select, textarea { width: 100%; box-sizing: border-box; padding: .4rem .55rem; border: 1px solid #d4d4d4; border-radius: 7px; font: inherit; font-size: .88rem; margin-top: .15rem; }
+  .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(32rem, 92vw); max-height: 88vh; overflow-y: auto; background: var(--card); border-radius: var(--r-lg); padding: var(--sp-5) var(--sp-5); box-shadow: 0 12px 40px rgba(0,0,0,.2); }
+  h2 { margin: 0 0 var(--sp-1); font-size: var(--fs-lg); }
+  .hint { margin: 0 0 var(--sp-3); }
+  label { display: block; font-size: var(--fs-sm); color: var(--muted); margin-bottom: .55rem; }
+  input, textarea { width: 100%; box-sizing: border-box; padding: .4rem .55rem; border: 1px solid var(--wire); border-radius: var(--r-md); font: inherit; font-size: var(--fs-md); color: var(--ink); background: var(--card); margin-top: .15rem; }
   textarea { min-height: 5rem; resize: vertical; }
-  .actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .5rem; }
-  .actions button { padding: .4rem .9rem; border: 1px solid #d4d4d4; border-radius: 7px; background: #fff; cursor: pointer; font: inherit; }
-  .actions .primary { background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 600; }
-  .error { color: #b91c1c; font-size: .85rem; }
+  .actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+  .field { display: block; margin-bottom: 0.55rem; }
+  .flabel { display: block; font-size: var(--fs-sm); color: var(--muted); margin-bottom: 0.15rem; }
 </style>

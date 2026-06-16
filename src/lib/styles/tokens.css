@@ -1,0 +1,90 @@
+/* Design tokens — single source of truth. Theme: "Vesper" (warm, serif, editorial).
+ * Change the look HERE, not in components. */
+:root {
+  /* surfaces */
+  --bg: #f1e9e4;
+  --card: #fdf9f5;
+  --card-hover: #f5ece6;
+  --panel-head: #f6ebed;
+
+  /* nav rail (dark plum) */
+  --rail: #241921;
+  --rail-ink: #bca7b3;
+  --rail-ink-active: #ffffff;
+  --rail-hover: #33232f;
+  --rail-muted: #856f7d;
+  --rail-sep: #382734;
+
+  /* text */
+  --ink: #291d24;
+  --ink-soft: #4b3a45;
+  --muted: #75606c;
+  --faint: #a890a0;
+
+  /* lines */
+  --line: #ebdde1;
+  --wire: #dcc7cd;
+
+  /* brand — two-color system: primary (dominant) + accent (distinct standout hue) */
+  --primary: #7d2348;
+  --primary-hover: #691838;
+  --primary-ring: rgba(125, 35, 72, 0.16);
+  --primary-soft: #f3dbe4;     /* aubergine ~14% over paper: active-option wash + active-nav plaque */
+  --accent: #b58320;
+  --accent-soft: #f4e7c5;
+  --accent-ink: #8a6110;
+
+  /* semantic state colors */
+  --good: #3c7a52;
+  --good-soft: #daecdf;
+  --warn: #b8701a;
+  --warn-soft: #f6e7c7;
+  --danger: #c23320;
+  --danger-soft: #f7d9d3;
+  --danger-border: #ecb3a8;
+
+  /* misc */
+  --flat-soft: #efe1e3;
+
+  /* type families (self-hosted via @fontsource, imported in +layout.svelte) */
+  --font-display: "Bodoni Moda Variable", Georgia, serif;   /* headings + company names */
+  --font-body: "Lora", Georgia, serif;             /* prose / notes */
+  --font-sans: "Spline Sans", -apple-system, system-ui, sans-serif; /* UI */
+
+  /* type scale (raised to mockup scale) */
+  --fs-xs: 0.74rem;
+  --fs-sm: 0.82rem;
+  --fs-md: 0.92rem;
+  --fs-lg: 1.05rem;
+  --fs-xl: 1.4rem;
+  --fs-co: 1.04rem;          /* company names */
+  --fs-mhead: 1.5rem;        /* home page title */
+  --fs-wname: 1.5rem;        /* workspace title */
+  --fs-panel-head: 0.78rem;
+  --fs-panel-body: 0.92rem;
+
+  /* monogram */
+  --monogram-size: 2rem;
+  --monogram-fs: 0.66rem;
+
+  /* space */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-row-y: 0.6rem;        /* list/queue row vertical padding */
+  --sp-content: 1.2rem;      /* surface horizontal padding */
+
+  /* radius — squared off ("Vesper" wants crisp straight edges, like the no-emoji decision) */
+  --r-sm: 0;
+  --r-md: 0;
+  --r-lg: 0;
+  --r-pill: 0;
+  --r-panel: 0;
+
+  /* layout */
+  --rail-w: 9.5rem;
+  --content-max: 1040px;
+}

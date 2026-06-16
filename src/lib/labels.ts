@@ -29,7 +29,23 @@ export function humanize(value: string): string {
     .join(" ");
 }
 
+/** Human relative date, e.g. relativeDate("2026-06-10","2026-06-15") -> "5d ago". */
+export function relativeDate(fromIso: string, todayIso: string): string {
+  const from = new Date(fromIso + "T00:00:00");
+  const today = new Date(todayIso + "T00:00:00");
+  const days = Math.round((today.getTime() - from.getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
+}
+
 /** Humanize a list (e.g. domains, business_model) for display. */
 export function humanizeList(values: string[]): string {
   return values.map(humanize).join(", ");
+}
+
+/** Two-character monogram for a company logo fallback (e.g. "Stripe" -> "St"). */
+export function monogram(name: string): string {
+  const n = name.trim();
+  return n ? n.slice(0, 2) : "?";
 }

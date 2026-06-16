@@ -73,6 +73,9 @@ export const companiesStore = {
   async softRemove(slug: string, status: "removed" | "exhausted" = "removed") {
     apply(await setCompanyStatus(vaultPath!, slug, status));
   },
+  async updateField(slug: string, key: string, value: string) {
+    apply(await updateCompanyField(vaultPath!, slug, key, value));
+  },
   async create(nc: NewCompany): Promise<Company> {
     const c = await createCompany(vaultPath!, nc);
     companies = [...companies, c].sort(byName);
