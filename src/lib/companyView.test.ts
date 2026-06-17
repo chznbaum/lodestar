@@ -52,7 +52,7 @@ describe("applyView", () => {
     expect(r.flat.map((c) => c.name)).toEqual(["Gamma", "Beta", "Alpha"]);
   });
 
-  it("groups by industry (primary domain), sorted group keys", () => {
+  it("groups by domain, sorted group keys", () => {
     const r = applyView(data, { ...base, group: true });
     expect(r.groups!.map((g) => g.key)).toEqual(["fintech", "healthcare"]);
     expect(r.groups!.find((g) => g.key === "healthcare")!.items.map((c) => c.slug)).toEqual(["b", "c"]);

@@ -4,18 +4,9 @@
 use crate::note::{self, set_body, set_frontmatter_field, slugify, split_frontmatter};
 use chrono::{Local, NaiveDate};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const DEALBREAKER: &[&str] = &[
-    "defense_military",
-    "alcohol",
-    "tobacco_vaping",
-    "firearms_weapons",
-    "gambling",
-    "crypto_web3",
-    "oil_gas",
-];
-const CAUTION: &[&str] = &["adult_content"];
 pub const STATUSES: &[&str] = &["active", "paused", "exhausted", "removed"];
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -93,10 +84,16 @@ pub fn is_due(status: Option<&str>, last_checked: Option<&str>, today: NaiveDate
     }
 }
 
-pub fn screening_for(domain: &[String]) -> Option<String> {
-    if domain.iter().any(|d| DEALBREAKER.contains(&d.as_str())) {
-        Some("dealbreaker".into())
-    } else if domain.iter().any(|d| CAUTION.contains(&d.as_str())) {
+pub fn screening_for(domain: &[String], screen: &HashMap<String, String>) -> Option<String> {
+    let mut caution = false;
+    for d in domain {
+        match screen.get(d).map(String::as_str) {
+            Some("dealbreaker") => return Some("dealbreaker".into()),
+            Some("caution") => caution = true,
+            _ => {}
+        }
+    }
+    if caution {
         Some("caution".into())
     } else {
         None
@@ -111,12 +108,17 @@ pub fn validate_status(status: &str) -> Result<(), String> {
     }
 }
 
-pub fn parse_company(slug: &str, text: &str, today: NaiveDate) -> Result<Company, String> {
+pub fn parse_company(
+    slug: &str,
+    text: &str,
+    today: NaiveDate,
+    screen: &HashMap<String, String>,
+) -> Result<Company, String> {
     let (fm, body) = split_frontmatter(text);
     let f: Front = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
     let last_checked = f.last_checked.filter(|s| !s.trim().is_empty());
     let due_for_check = is_due(f.status.as_deref(), last_checked.as_deref(), today);
-    let screening = screening_for(&f.domain);
+    let screening = screening_for(&f.domain, screen);
     Ok(Company {
         slug: slug.to_string(),
         name: f.name.unwrap_or_else(|| slug.to_string()),
@@ -199,6 +201,7 @@ fn company_path(vault_path: &str, slug: &str) -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn list_companies(vault_path: String) -> Result<Vec<Company>, String> {
     let today = Local::now().date_naive();
+    let screen = crate::domain::screening_map(&vault_path);
     let dir = Path::new(&vault_path).join("companies");
     let mut out = Vec::new();
     for entry in std::fs::read_dir(&dir).map_err(|e| format!("read {dir:?}: {e}"))? {
@@ -208,7 +211,7 @@ pub fn list_companies(vault_path: String) -> Result<Vec<Company>, String> {
             continue;
         };
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        match parse_company(&slug, &text, today) {
+        match parse_company(&slug, &text, today, &screen) {
             Ok(c) => out.push(c),
             Err(e) => eprintln!("skip {slug}: {e}"),
         }
@@ -231,7 +234,8 @@ pub fn update_company_field(
     let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
     let updated = set_frontmatter_field(&text, &key, &value)?;
     std::fs::write(&p, &updated).map_err(|e| e.to_string())?;
-    parse_company(&slug, &updated, Local::now().date_naive())
+    let screen = crate::domain::screening_map(&vault_path);
+    parse_company(&slug, &updated, Local::now().date_naive(), &screen)
 }
 
 #[tauri::command]
@@ -244,7 +248,8 @@ pub fn set_company_notes(
     let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
     let updated = set_body(&text, &body)?;
     std::fs::write(&p, &updated).map_err(|e| e.to_string())?;
-    parse_company(&slug, &updated, Local::now().date_naive())
+    let screen = crate::domain::screening_map(&vault_path);
+    parse_company(&slug, &updated, Local::now().date_naive(), &screen)
 }
 
 /// Soft-remove / retire: a validated `status` write (the UI never hard-deletes notes).
@@ -272,7 +277,8 @@ pub fn create_company(vault_path: String, company: NewCompany) -> Result<Company
     }
     let text = render_company_note(&slug, &company);
     std::fs::write(&p, &text).map_err(|e| e.to_string())?;
-    parse_company(&slug, &text, Local::now().date_naive())
+    let screen = crate::domain::screening_map(&vault_path);
+    parse_company(&slug, &text, Local::now().date_naive(), &screen)
 }
 
 #[cfg(test)]
@@ -287,7 +293,7 @@ mod tests {
 
     #[test]
     fn parses_company_fields_and_body() {
-        let c = parse_company("stripe", SAMPLE, d("2026-06-15")).unwrap();
+        let c = parse_company("stripe", SAMPLE, d("2026-06-15"), &HashMap::new()).unwrap();
         assert_eq!(c.slug, "stripe");
         assert_eq!(c.name, "Stripe");
         assert_eq!(c.domain, vec!["financial_services".to_string()]);
@@ -298,7 +304,7 @@ mod tests {
 
     #[test]
     fn active_and_never_checked_is_due() {
-        let c = parse_company("stripe", SAMPLE, d("2026-06-15")).unwrap();
+        let c = parse_company("stripe", SAMPLE, d("2026-06-15"), &HashMap::new()).unwrap();
         assert!(c.due_for_check);
     }
 
@@ -315,21 +321,34 @@ mod tests {
 
     #[test]
     fn screening_flags_dealbreaker_then_caution() {
+        let map: HashMap<String, String> = [
+            ("defense_military", "dealbreaker"),
+            ("crypto_web3", "dealbreaker"),
+            ("adult_content", "caution"),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
         assert_eq!(
-            screening_for(&["defense_military".into()]).as_deref(),
+            screening_for(&["defense_military".into()], &map).as_deref(),
+            Some("dealbreaker")
+        );
+        // dealbreaker wins over caution regardless of order
+        assert_eq!(
+            screening_for(&["adult_content".into(), "defense_military".into()], &map).as_deref(),
             Some("dealbreaker")
         );
         assert_eq!(
-            screening_for(&["healthcare".into(), "adult_content".into()]).as_deref(),
+            screening_for(&["healthcare".into(), "adult_content".into()], &map).as_deref(),
             Some("caution")
         );
-        assert_eq!(screening_for(&["healthcare".into()]), None);
+        assert_eq!(screening_for(&["healthcare".into()], &map), None);
     }
 
     #[test]
     fn ignores_unknown_frontmatter_keys() {
         let text = "---\nid: x\nname: \"X\"\nstatus: paused\nbusiness_model: [b2b]\ndomain_raw: \"whatever\"\nsource: \"claude_research_batch_1\"\n---\n\nbody\n";
-        let c = parse_company("x", text, d("2026-06-15")).unwrap();
+        let c = parse_company("x", text, d("2026-06-15"), &HashMap::new()).unwrap();
         assert_eq!(c.name, "X");
         assert_eq!(c.status.as_deref(), Some("paused"));
         assert_eq!(c.source.as_deref(), Some("claude_research_batch_1"));
@@ -360,7 +379,7 @@ mod tests {
             notes: "Why listed: warm intro via X.".into(),
         };
         let text = render_company_note("acme-inc", &nc);
-        let c = parse_company("acme-inc", &text, d("2026-06-16")).unwrap();
+        let c = parse_company("acme-inc", &text, d("2026-06-16"), &HashMap::new()).unwrap();
         assert_eq!(c.name, "Acme, Inc.");
         assert_eq!(c.domain, vec!["fintech".to_string(), "ai".to_string()]);
         assert_eq!(c.business_model, vec!["b2b".to_string()]);
@@ -443,9 +462,9 @@ mod tests {
         let vault = std::env::var("LODESTAR_VAULT").expect("set LODESTAR_VAULT");
         let text =
             std::fs::read_to_string(format!("{vault}/companies/stripe.md")).unwrap();
-        let before = parse_company("stripe", &text, d("2026-06-15")).unwrap();
+        let before = parse_company("stripe", &text, d("2026-06-15"), &HashMap::new()).unwrap();
         let out = set_frontmatter_field(&text, "status", "paused").unwrap();
-        let after = parse_company("stripe", &out, d("2026-06-15")).unwrap();
+        let after = parse_company("stripe", &out, d("2026-06-15"), &HashMap::new()).unwrap();
         assert_eq!(after.status.as_deref(), Some("paused"));
         assert_eq!(after.name, before.name);
         assert_eq!(after.domain, before.domain);

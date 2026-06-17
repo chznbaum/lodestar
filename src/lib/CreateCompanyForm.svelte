@@ -2,6 +2,7 @@
   import { companiesStore as cs } from "$lib/companies.svelte";
   import type { NewCompany } from "$lib/vault";
   import Combobox from "$lib/Combobox.svelte";
+  import DomainPicker from "$lib/DomainPicker.svelte";
   import { humanize } from "$lib/labels";
 
   let { onclose, oncreated }: { onclose: () => void; oncreated: (slug: string) => void } = $props();
@@ -9,7 +10,7 @@
   let name = $state("");
   let website = $state("");
   let careers_url = $state("");
-  let domain = $state(""); // comma-separated raw slugs
+  let domain = $state<string[]>([]);
   let business_model = $state("");
   let company_size = $state("");
   let stage = $state("");
@@ -39,7 +40,7 @@
       name: name.trim(),
       website: website.trim() || null,
       careers_url: careers_url.trim() || null,
-      domain: splitList(domain),
+      domain: domain,
       business_model: splitList(business_model),
       domain_raw: null,
       company_size: company_size || null,
@@ -64,12 +65,12 @@
 <div class="backdrop" onclick={onclose} role="presentation"></div>
 <div class="modal" role="dialog" aria-modal="true" aria-label="Add company">
   <h2>Add company</h2>
-  <p class="hint">Raw slug values for domain/model (e.g. <code>financial_services, ai</code>). Web-research auto-fill arrives in a later phase.</p>
+  <p class="hint">Pick domains from the list. Business model is a raw slug (e.g. <code>b2b</code>). Web-research auto-fill arrives in a later phase.</p>
   {#if error}<p class="error">{error}</p>{/if}
   <label>Name<input bind:value={name} placeholder="Acme, Inc." /></label>
   <label>Website<input bind:value={website} placeholder="https://…" /></label>
   <label>Careers URL<input bind:value={careers_url} placeholder="https://…/careers" /></label>
-  <label>Domain(s)<input bind:value={domain} placeholder="financial_services, ai" /></label>
+  <div class="field"><span class="flabel">Domain(s)</span><DomainPicker bind:value={domain} /></div>
   <label>Business model(s)<input bind:value={business_model} placeholder="b2b" /></label>
   <div class="field"><span class="flabel">Size</span><Combobox placeholder="Size" bind:value={company_size} options={sizeOpts} /></div>
   <div class="field"><span class="flabel">Stage</span><Combobox placeholder="Stage" bind:value={stage} options={stageOpts} /></div>

@@ -4,7 +4,7 @@ export type SortKey = "name" | "company_size" | "stage" | "last_checked";
 
 export interface Filters {
   status?: string;
-  industry?: string; // matches any domain
+  domain?: string; // matches any of the company's domains
   remote?: string;
   size?: string;
   stage?: string;
@@ -64,7 +64,7 @@ export function applyView(companies: Company[], opts: ViewOptions): ViewResult {
   let rows = companies.filter((c) => {
     if (q && !`${c.name} ${c.domain.join(" ")} ${c.notes}`.toLowerCase().includes(q)) return false;
     if (f.status && c.status !== f.status) return false;
-    if (f.industry && !c.domain.includes(f.industry)) return false;
+    if (f.domain && !c.domain.includes(f.domain)) return false;
     if (f.remote && c.remote_policy !== f.remote) return false;
     if (f.size && c.company_size !== f.size) return false;
     if (f.stage && c.stage !== f.stage) return false;

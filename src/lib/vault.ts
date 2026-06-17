@@ -36,6 +36,18 @@ export function listCompanies(vaultPath: string): Promise<Company[]> {
   return invoke<Company[]>("list_companies", { vaultPath });
 }
 
+export interface Domain {
+  slug: string;
+  name: string;
+  aliases: string[];
+  screening: "dealbreaker" | "caution" | null;
+}
+
+/** Read + parse every domain note under `<vaultPath>/domains`. */
+export function listDomains(vaultPath: string): Promise<Domain[]> {
+  return invoke<Domain[]>("list_domains", { vaultPath });
+}
+
 const STATUSES = ["active", "paused", "exhausted", "removed"] as const;
 export type CompanyStatus = (typeof STATUSES)[number];
 export const COMPANY_STATUSES = STATUSES;

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { companiesStore as cs } from "$lib/companies.svelte";
+  import { domainsStore as ds } from "$lib/domains.svelte";
   import { applyView, distinct, queueSections, type SortKey } from "$lib/companyView";
-  import type { Company } from "$lib/vault";
+  import type { Company, Domain } from "$lib/vault";
   import { todayIso } from "$lib/vault";
-  import { humanize, humanizeList, monogram, relativeDate } from "$lib/labels";
+  import { humanize, monogram, relativeDate } from "$lib/labels";
   import CreateCompanyForm from "$lib/CreateCompanyForm.svelte";
   import Combobox from "$lib/Combobox.svelte";
 
@@ -12,7 +13,7 @@
   let tab = $state<Tab>("queue");
   let query = $state("");
   let status = $state("");
-  let industry = $state("");
+  let domainFilter = $state("");
   let remote = $state("");
   let size = $state("");
   let stage = $state("");
@@ -22,16 +23,22 @@
 
   $effect(() => {
     if (cs.vaultPath && !cs.loaded && !cs.loading) cs.load();
+    if (cs.vaultPath && !ds.loadedFor(cs.vaultPath)) ds.load(cs.vaultPath);
   });
 
-  const industries = $derived(distinct(cs.companies, (c) => c.domain));
   const statuses = $derived(distinct(cs.companies, (c) => c.status));
   const remotes = $derived(distinct(cs.companies, (c) => c.remote_policy));
   const sizes = $derived(distinct(cs.companies, (c) => c.company_size));
   const stages = $derived(distinct(cs.companies, (c) => c.stage));
 
   const statusOptions = $derived(statuses.map((s) => ({ label: humanize(s), value: s })));
-  const industryOptions = $derived(industries.map((i) => ({ label: humanize(i), value: i })));
+  const domainOptions = $derived(
+    distinct(cs.companies, (c) => c.domain)
+      .map((slug) => ds.bySlug(slug))
+      .filter((d): d is Domain => d !== null)
+      .map((d) => ({ label: d.name, value: d.slug, aliases: d.aliases }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  );
   const remoteOptions = $derived(remotes.map((r) => ({ label: humanize(r), value: r })));
   const sizeOptions = $derived(sizes.map((s) => ({ label: humanize(s), value: s })));
   const stageOptions = $derived(stages.map((s) => ({ label: humanize(s), value: s })));
@@ -41,7 +48,7 @@
       query,
       filters: {
         status: status || undefined,
-        industry: industry || undefined,
+        domain: domainFilter || undefined,
         remote: remote || undefined,
         size: size || undefined,
         stage: stage || undefined,
@@ -73,7 +80,7 @@
 <main>
   <div class="mhead">
     <h1>Companies <span class="count">{cs.companies.length}</span></h1>
-    <input class="search" placeholder="Search name, industry, notes…" bind:value={query} />
+    <input class="search" placeholder="Search name, domain, notes…" bind:value={query} />
     <button class="btn ghost" onclick={() => (cs.vaultPath ? (showCreate = true) : cs.choose())}>
       {cs.vaultPath ? "+ Add company" : "Choose vault"}
     </button>
@@ -92,7 +99,7 @@
 
   <div class="filters">
     <Combobox placeholder="Status" bind:value={status} options={statusOptions} />
-    <Combobox placeholder="Industry" bind:value={industry} options={industryOptions} />
+    <Combobox placeholder="Domain" bind:value={domainFilter} options={domainOptions} />
     <Combobox placeholder="Remote" bind:value={remote} options={remoteOptions} />
     <Combobox placeholder="Size" bind:value={size} options={sizeOptions} />
     <Combobox placeholder="Stage" bind:value={stage} options={stageOptions} />
@@ -105,6 +112,7 @@
   {/if}
 
   {#if cs.error}<p class="error">{cs.error}</p>{/if}
+  {#if ds.error}<p class="error">Domains: {ds.error}</p>{/if}
   {#if !cs.vaultPath}<p class="hint">Pick your <code>jobsearch-vault</code> folder to begin.</p>
   {:else if cs.loading}<p class="hint">Loading…</p>{/if}
 
@@ -130,7 +138,7 @@
   {:else if tab === "domain"}
     {@render thead()}
     {#each view.groups ?? [] as g (g.key)}
-      <h2 class="group">{humanize(g.key)} <span class="count">{g.items.length}</span></h2>
+      <h2 class="group">{ds.bySlug(g.key)?.name ?? g.key} <span class="count">{g.items.length}</span></h2>
       {@render rows(g.items)}
     {/each}
   {:else if tab === "prospects"}
@@ -151,7 +159,7 @@
   <div class="thead">
     <span class="col mono-col"></span>
     <button class="col" onclick={() => setSort("name")}>Name {sortKey === "name" ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
-    <span class="col">Industry</span>
+    <span class="col">Domain</span>
     <button class="col" onclick={() => setSort("company_size")}>Size {sortKey === "company_size" ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
     <button class="col" onclick={() => setSort("stage")}>Stage {sortKey === "stage" ? (sortDir === "asc" ? "↑" : "↓") : ""}</button>
     <span class="col">Remote</span>
@@ -166,7 +174,7 @@
         <span class="monogram">{monogram(c.name)}</span>
         <button class="qrow-body" onclick={() => open(c.slug)}>
           <span class="nm">{c.name}{#if c.screening === "dealbreaker"}<span class="chip danger">dealbreaker</span>{:else if c.screening === "caution"}<span class="chip warn">caution</span>{/if}{#each c.business_model as bm}<span class="chip flat">{humanize(bm)}</span>{/each}</span>
-          <span class="meta">{humanizeList(c.domain)}{#if c.company_size}&nbsp;•&nbsp;{humanize(c.company_size)}{/if}{#if c.remote_policy}&nbsp;•&nbsp;{humanize(c.remote_policy)}{/if}</span>
+          <span class="meta">{ds.resolve(c.domain).names.join(", ")}{#if c.company_size}&nbsp;•&nbsp;{humanize(c.company_size)}{/if}{#if c.remote_policy}&nbsp;•&nbsp;{humanize(c.remote_policy)}{/if}</span>
         </button>
         {#if c.last_checked}
           <span class="sub">checked {relativeDate(c.last_checked, todayIso())}</span>
@@ -186,7 +194,7 @@
         <span class="monogram">{monogram(c.name)}</span>
         <button class="qrow-body" onclick={() => open(c.slug)}>
           <span class="nm">{c.name}{#if c.screening === "dealbreaker"}<span class="chip danger">dealbreaker</span>{:else if c.screening === "caution"}<span class="chip warn">caution</span>{/if}{#each c.business_model as bm}<span class="chip flat">{humanize(bm)}</span>{/each}</span>
-          <span class="meta">{humanizeList(c.domain)}{#if c.company_size} · {humanize(c.company_size)}{/if}{#if c.remote_policy} · {humanize(c.remote_policy)}{/if}</span>
+          <span class="meta">{ds.resolve(c.domain).names.join(", ")}{#if c.company_size} · {humanize(c.company_size)}{/if}{#if c.remote_policy} · {humanize(c.remote_policy)}{/if}</span>
         </button>
         {#if c.last_checked}
           <span class="sub">checked {relativeDate(c.last_checked, todayIso())}</span>
@@ -206,7 +214,7 @@
         <button class="row" onclick={() => open(c.slug)}>
           <span class="monogram">{monogram(c.name)}</span>
           <span class="name">{c.name}{#if c.screening === "dealbreaker"}<span class="chip danger">dealbreaker</span>{:else if c.screening === "caution"}<span class="chip warn">caution</span>{/if}</span>
-          <span class="meta">{humanizeList(c.domain)}</span>
+          <span class="meta">{ds.resolve(c.domain).names.join(", ")}</span>
           <span class="meta">{humanize(c.company_size ?? "")}</span>
           <span class="meta">{humanize(c.stage ?? "")}</span>
           <span class="meta">{humanize(c.remote_policy ?? "")}</span>

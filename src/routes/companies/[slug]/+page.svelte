@@ -2,16 +2,22 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { companiesStore as cs } from "$lib/companies.svelte";
+  import { domainsStore as ds } from "$lib/domains.svelte";
   import { COMPANY_STATUSES } from "$lib/vault";
   import { humanize, humanizeList } from "$lib/labels";
   import { renderNotes } from "$lib/markdown";
   import Combobox from "$lib/Combobox.svelte";
+  import DomainPicker from "$lib/DomainPicker.svelte";
 
   const slug = $derived(page.params.slug ?? "");
   const company = $derived(cs.bySlug(slug));
+  const domainResolved = $derived(
+    company ? ds.resolve(company.domain) : { names: [] as string[], unknown: [] as string[] },
+  );
 
   $effect(() => {
     if (cs.vaultPath && !cs.loaded && !cs.loading) cs.load();
+    if (cs.vaultPath && !ds.loadedFor(cs.vaultPath)) ds.load(cs.vaultPath);
   });
 
   let editingNotes = $state(false);
@@ -20,12 +26,13 @@
 
   let editingDetails = $state(false);
   let detailDraft = $state<Record<string, string>>({});
+  let domainDraft = $state<string[]>([]);
 
   function openDetailEdit() {
     const c = company;
     if (!c) return;
+    domainDraft = [...c.domain];
     detailDraft = {
-      domain: c.domain.join(", "),
       business_model: c.business_model.join(", "),
       company_size: c.company_size ?? "",
       stage: c.stage ?? "",
@@ -57,11 +64,15 @@
     if (!c) return;
     const writes: Array<[string, string]> = [];
 
-    // List fields
-    for (const key of ["domain", "business_model"] as const) {
-      const formatted = fmtList(detailDraft[key] ?? "");
-      const current = currentFmtList(c[key]);
-      if (formatted !== current) writes.push([key, formatted]);
+    // domain — from the validated picker (string[])
+    if (currentFmtList(domainDraft) !== currentFmtList(c.domain)) {
+      writes.push(["domain", currentFmtList(domainDraft)]);
+    }
+
+    // business_model — free-text list field
+    const bmFormatted = fmtList(detailDraft.business_model ?? "");
+    if (bmFormatted !== currentFmtList(c.business_model)) {
+      writes.push(["business_model", bmFormatted]);
     }
 
     // Scalar fields
@@ -105,7 +116,7 @@
     <header class="whead">
       <div class="wname-block">
         <h1 class="wname">{c.name}</h1>
-        <p class="wsub">{[humanizeList(c.domain), humanize(c.company_size ?? ""), humanize(c.stage ?? ""), humanize(c.remote_policy ?? ""), c.location].filter(Boolean).join(" · ")}</p>
+        <p class="wsub">{[domainResolved.names.join(", "), humanize(c.company_size ?? ""), humanize(c.stage ?? ""), humanize(c.remote_policy ?? ""), c.location].filter(Boolean).join(" · ")}</p>
       </div>
       <span class="spacer"></span>
       {#if c.screening}
@@ -185,8 +196,8 @@
         {#if editingDetails}
           <div class="pb">
             <div class="detail-edit">
-              <label class="de-label" for="de-domain">Industry</label>
-              <input id="de-domain" class="de-input" type="text" bind:value={detailDraft.domain} placeholder="e.g. ai, fintech" />
+              <span class="de-label">Domain</span>
+              <DomainPicker bind:value={domainDraft} />
 
               <label class="de-label" for="de-business_model">Model</label>
               <input id="de-business_model" class="de-input" type="text" bind:value={detailDraft.business_model} placeholder="e.g. saas, marketplace" />
@@ -207,7 +218,7 @@
               <label class="de-label" for="de-careers_url">Careers</label>
               <input id="de-careers_url" class="de-input" type="text" bind:value={detailDraft.careers_url} />
 
-              <label class="de-label" for="de-domain_raw">Industry (raw)</label>
+              <label class="de-label" for="de-domain_raw">Domain (raw)</label>
               <input id="de-domain_raw" class="de-input" type="text" bind:value={detailDraft.domain_raw} />
 
               <label class="de-label" for="de-source">Source</label>
@@ -217,7 +228,7 @@
         {:else}
           <div class="pb">
             <dl class="meta-grid">
-              <dt>Industry</dt><dd>{humanizeList(c.domain) || "—"}{#if c.domain_raw}&nbsp;<span class="sub-sm">({c.domain_raw})</span>{/if}</dd>
+              <dt>Domain</dt><dd>{domainResolved.names.join(", ") || "—"}{#if c.domain_raw}&nbsp;<span class="sub-sm">({c.domain_raw})</span>{/if}{#if domainResolved.unknown.length}<span class="domain-error">⚠ unknown domain: {domainResolved.unknown.join(", ")} — no note in jobsearch-vault/domains/</span>{/if}</dd>
               <dt>Model</dt><dd>{humanizeList(c.business_model) || "—"}</dd>
               <dt>Size</dt><dd>{humanize(c.company_size ?? "") || "—"}</dd>
               <dt>Stage</dt><dd>{humanize(c.stage ?? "") || "—"}</dd>
@@ -324,6 +335,13 @@
 
   .sub-sm {
     font-size: var(--fs-xs);
+  }
+
+  .domain-error {
+    display: block;
+    color: var(--danger);
+    font-size: var(--fs-xs);
+    margin-top: 0.15rem;
   }
 
   /* ── tabs ── */
