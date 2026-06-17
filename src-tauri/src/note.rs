@@ -2,6 +2,8 @@
 //! frontmatter/body splitting, field-level round-tripping writes, and the
 //! filename → slug eligibility rule. No entity-specific knowledge lives here.
 
+use std::path::Path;
+
 /// Assumes the controlled vault note format: the first `\n---` after the opening
 /// fence is the closing delimiter. Not a general YAML parser.
 /// Split a note into (frontmatter_yaml, body). Returns ("", whole) if no frontmatter.
@@ -74,6 +76,34 @@ pub fn slugify(name: &str) -> String {
     out
 }
 
+/// Read every eligible note under `dir`, parsing each via `parse(slug, text)`. Skips
+/// non-`.md`/underscored files (per `note_slug`); a **missing dir yields an empty Vec**
+/// (a present-but-unreadable dir errors). Parse errors are logged and that note skipped.
+pub fn read_notes_in<T>(
+    dir: &Path,
+    parse: impl Fn(&str, &str) -> Result<T, String>,
+) -> Result<Vec<T>, String> {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("read {dir:?}: {e}")),
+    };
+    let mut out = Vec::new();
+    for entry in rd {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let Some(slug) = note_slug(file_name) else {
+            continue;
+        };
+        let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        match parse(&slug, &text) {
+            Ok(v) => out.push(v),
+            Err(e) => eprintln!("skip {slug}: {e}"),
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +162,28 @@ mod tests {
         assert_eq!(note_slug("_template.md"), None);
         assert_eq!(note_slug("notes.txt"), None);
         assert_eq!(note_slug(".md"), None);
+    }
+
+    #[test]
+    fn read_notes_in_parses_skips_underscored_and_missing_dir_is_empty() {
+        let dir = std::env::temp_dir().join(format!("lodestar-readnotes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "---\nid: a\n---\n").unwrap();
+        std::fs::write(dir.join("b.md"), "---\nid: b\n---\n").unwrap();
+        std::fs::write(dir.join("_t.md"), "---\nid: t\n---\n").unwrap(); // skipped (underscored)
+        std::fs::write(dir.join("readme.txt"), "x").unwrap(); // skipped (non-md)
+
+        let mut slugs =
+            read_notes_in(&dir, |slug, _text| Ok::<_, String>(slug.to_string())).unwrap();
+        slugs.sort();
+        assert_eq!(slugs, vec!["a".to_string(), "b".to_string()]);
+
+        std::fs::remove_dir_all(&dir).ok();
+        // Missing dir -> empty Vec, never an error.
+        let missing = std::path::Path::new("/no/such/lodestar/dir");
+        assert!(read_notes_in(missing, |s, _| Ok::<_, String>(s.to_string()))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

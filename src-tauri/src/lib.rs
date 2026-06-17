@@ -1,5 +1,6 @@
 mod company;
 mod domain;
+mod job;
 mod note;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -13,7 +14,8 @@ pub fn run() {
             company::set_company_notes,
             company::create_company,
             company::set_company_status,
-            domain::list_domains
+            domain::list_domains,
+            job::list_jobs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
