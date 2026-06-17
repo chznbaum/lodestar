@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { goto } from "$app/navigation";
   import { companiesStore as cs } from "$lib/companies.svelte";
   import { domainsStore as ds } from "$lib/domains.svelte";
-  import { applyView, distinct, queueSections, type SortKey } from "$lib/companyView";
+  import { applyView, distinct, queueSections, type SortKey, type RankedMatch } from "$lib/companyView";
+  import { segments } from "$lib/highlight";
   import type { Company, Domain } from "$lib/vault";
   import { todayIso } from "$lib/vault";
   import { humanize, monogram, relativeDate } from "$lib/labels";
@@ -20,6 +22,7 @@
   let sortKey = $state<SortKey>("name");
   let sortDir = $state<"asc" | "desc">("asc");
   let showCreate = $state(false);
+  let activeIndex = $state(-1);
 
   $effect(() => {
     if (cs.vaultPath && !cs.loaded && !cs.loading) cs.load();
@@ -55,9 +58,24 @@
       },
       sort: { key: sortKey, dir: sortDir },
       group: tab === "domain",
+      resolveDomains: (slugs: string[]) =>
+        slugs.map((s) => {
+          const d = ds.bySlug(s);
+          return d ? { name: d.name, aliases: d.aliases ?? [] } : { name: s, aliases: [] };
+        }),
     }),
   );
   const queue = $derived(queueSections(view.flat));
+  $effect(() => {
+    query;
+    view.ranked;
+    activeIndex = -1;
+  });
+
+  const searching = $derived(query.trim() !== "");
+  const tabLabel = $derived(
+    tab === "queue" ? "Queue" : tab === "all" ? "All" : tab === "domain" ? "By domain" : "Best prospects",
+  );
 
   // E.3 — sortLabel derived
   const sortLabel = $derived.by((): string => {
@@ -71,6 +89,53 @@
   function open(slug: string) {
     goto(`/companies/${slug}`);
   }
+
+  async function scrollActiveIntoView() {
+    await tick();
+    if (activeIndex < 0) return;
+    const slug = (view.ranked ?? [])[activeIndex]?.company.slug;
+    if (slug) document.getElementById(`result-${slug}`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function onSearchKey(e: KeyboardEvent) {
+    const matches = view.ranked ?? [];
+    if (e.key === "Escape") {
+      e.preventDefault();
+      query = "";
+      activeIndex = -1;
+      return;
+    }
+    if (!searching || matches.length === 0) return;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        activeIndex = activeIndex >= matches.length - 1 ? 0 : activeIndex + 1;
+        scrollActiveIntoView();
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        activeIndex = activeIndex <= 0 ? matches.length - 1 : activeIndex - 1;
+        scrollActiveIntoView();
+        break;
+      case "Home":
+        e.preventDefault();
+        activeIndex = 0;
+        scrollActiveIntoView();
+        break;
+      case "End":
+        e.preventDefault();
+        activeIndex = matches.length - 1;
+        scrollActiveIntoView();
+        break;
+      case "Enter":
+        if (activeIndex >= 0) {
+          e.preventDefault();
+          open(matches[activeIndex].company.slug);
+        }
+        break;
+    }
+  }
+
   function setSort(key: SortKey) {
     if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
     else { sortKey = key; sortDir = "asc"; }
@@ -80,7 +145,23 @@
 <main class="companies">
   <div class="companies__header">
     <h1>Companies <span class="companies__count">{cs.companies.length}</span></h1>
-    <input class="companies__search" type="text" placeholder="Search name, domain, notes…" bind:value={query} />
+    <div class="companies__search-wrap">
+      <input
+        class="companies__search"
+        type="text"
+        placeholder="Search name, domain, notes…"
+        bind:value={query}
+        onkeydown={onSearchKey}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={searching}
+        aria-controls="company-search-results"
+        aria-activedescendant={activeIndex >= 0 && view.ranked
+          ? `result-${view.ranked[activeIndex].company.slug}`
+          : undefined}
+      />
+      {#if searching}<span class="companies__search-hint">↑↓ move · ↵ open · esc clear</span>{/if}
+    </div>
     <button class="btn ghost" onclick={() => (cs.vaultPath ? (showCreate = true) : cs.choose())}>
       {cs.vaultPath ? "+ Add company" : "Choose vault"}
     </button>
@@ -106,7 +187,12 @@
     <span class="sub">sorted by {sortLabel}</span>
   </div>
 
-  {#if view.flat.length !== cs.companies.length}
+  {#if searching}
+    <p class="companies__filter-count hint">
+      <b>{(view.ranked ?? []).length}</b> companies match "{query}" — ranked ·
+      <button class="linkbtn" onclick={() => (query = "")}>clear</button> to return to {tabLabel}
+    </p>
+  {:else if view.flat.length !== cs.companies.length}
     <p class="companies__filter-count hint">Showing {view.flat.length} of {cs.companies.length}</p>
   {/if}
 
@@ -115,7 +201,18 @@
   {#if !cs.vaultPath}<p class="hint">Pick your <code>jobsearch-vault</code> folder to begin.</p>
   {:else if cs.loading}<p class="hint">Loading…</p>{/if}
 
-  {#if tab === "queue"}
+  {#if searching}
+    {#if (view.ranked ?? []).length === 0}
+      <div class="companies__empty">
+        <div class="companies__empty-ico">∅</div>
+        <p class="companies__empty-title">No companies match "{query}"</p>
+        <p class="companies__empty-hint">Searched name, domain, and notes.</p>
+        <button class="btn sm" onclick={() => (query = "")}>↺ Clear search</button>
+      </div>
+    {:else}
+      {@render resultsList(view.ranked ?? [])}
+    {/if}
+  {:else if tab === "queue"}
     {@const q = queue}
     {#if q.neverFetched.length === 0 && q.staleChecked.length === 0}
       <p class="hint">Queue is empty — all companies are up to date.</p>
@@ -217,6 +314,48 @@
           <span class="companies__meta">{humanize(c.stage ?? "")}</span>
           <span class="companies__meta">{humanize(c.remote_policy ?? "")}</span>
         </button>
+      </li>
+    {/each}
+  </ul>
+{/snippet}
+
+{#snippet hl(text: string)}{#each segments(text, query) as s}{#if s.mark}<mark>{s.text}</mark>{:else}{s.text}{/if}{/each}{/snippet}
+
+{#snippet resultsList(matches: RankedMatch[])}
+  <div class="companies__rthead">
+    <span></span><span>Name</span><span>Domain</span><span>Size</span><span>Remote</span>
+  </div>
+  <ul class="companies__list" role="listbox" aria-label="Company search results" id="company-search-results">
+    {#each matches as m, i (m.company.slug)}
+      <!-- svelte-ignore a11y_click_events_have_key_events -- keyboard nav is centralized on the search input via aria-activedescendant (W3C combobox/listbox pattern) -->
+      <li
+        id="result-{m.company.slug}"
+        class="companies__result"
+        class:is-active={i === activeIndex}
+        role="option"
+        aria-selected={i === activeIndex}
+        onclick={() => open(m.company.slug)}
+        onmouseenter={() => (activeIndex = i)}
+      >
+        <span class="monogram">{monogram(m.company.name)}</span>
+        <span class="company-row__name">
+          {#if m.field === "name"}{@render hl(m.company.name)}{:else}{m.company.name}{/if}
+          {#if m.company.screening === "dealbreaker"}<span class="chip danger">dealbreaker</span>{:else if m.company.screening === "caution"}<span class="chip warn">caution</span>{/if}
+        </span>
+        <span class="companies__meta">
+          {#if m.field === "domain"}
+            {#each ds.resolve(m.company.domain).names as dn, di}{#if di > 0}, {/if}{#if dn === m.domainName}{@render hl(dn)}{:else}{dn}{/if}{/each}
+          {:else}
+            {ds.resolve(m.company.domain).names.join(", ")}
+          {/if}
+        </span>
+        <span class="companies__meta">{humanize(m.company.company_size ?? "")}</span>
+        <span class="companies__meta">{humanize(m.company.remote_policy ?? "")}</span>
+        {#if m.field === "domain-alias" && m.domainName && m.alias}
+          <span class="companies__reason">matches domain {m.domainName} (alias "{@render hl(m.alias)}")</span>
+        {:else if m.field === "notes" && m.notesSnippet}
+          <span class="companies__reason">{@render hl(m.notesSnippet)}</span>
+        {/if}
       </li>
     {/each}
   </ul>

@@ -205,13 +205,6 @@
   font-weight: 500;
   margin-left: 0.05rem;
 }
-.cbx-pop .cbx-opt mark {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  border-radius: 3px;
-  padding: 0 0.06em;
-  font-weight: 700;
-}
 
 /* active (keyboard / hover) row */
 .cbx-pop .cbx-opt.active {

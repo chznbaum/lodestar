@@ -1,6 +1,7 @@
 <script lang="ts">
   import { filterOptions, type ComboOption } from "$lib/combobox";
   import { portal } from "$lib/portal";
+  import { segments, type Segment } from "$lib/highlight";
 
   let {
     options,
@@ -49,10 +50,6 @@
   const showAnyRow = $derived(query.trim() === "");
   const activeOptionId = $derived(activeIndex >= 0 ? optionId(activeIndex) : undefined);
 
-  interface Segment {
-    text: string;
-    mark: boolean;
-  }
   interface OptionView {
     option: ComboOption;
     segments: Segment[]; // label split into matched / unmatched runs
@@ -60,22 +57,14 @@
   }
 
   function buildView(option: ComboOption, q: string): OptionView {
-    const label = option.label;
-    if (q === "") return { option, segments: [{ text: label, mark: false }], aliasHint: null };
-
-    const lower = label.toLowerCase();
-    const idx = lower.indexOf(q);
-    if (idx >= 0) {
-      const segments: Segment[] = [];
-      if (idx > 0) segments.push({ text: label.slice(0, idx), mark: false });
-      segments.push({ text: label.slice(idx, idx + q.length), mark: true });
-      if (idx + q.length < label.length) segments.push({ text: label.slice(idx + q.length), mark: false });
-      return { option, segments, aliasHint: null };
+    const segs = segments(option.label, q);
+    // q is already trimmed+lowercased by the caller. Empty query or a label
+    // hit → no alias hint; otherwise the row survived via an alias.
+    if (q === "" || segs.some((s) => s.mark)) {
+      return { option, segments: segs, aliasHint: null };
     }
-
-    // Label didn't match → it survived the filter via an alias.
     const aliasHint = (option.aliases ?? []).find((a) => a.toLowerCase().includes(q)) ?? null;
-    return { option, segments: [{ text: label, mark: false }], aliasHint };
+    return { option, segments: segs, aliasHint };
   }
 
   const optionViews = $derived(filtered.map((o) => buildView(o, query.trim().toLowerCase())));

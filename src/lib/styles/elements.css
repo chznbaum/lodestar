@@ -36,3 +36,12 @@ textarea:focus {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
 }
+
+/* highlighted match run (company search + combobox) — gold underlay, accent ink */
+mark {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-radius: 3px;
+  padding: 0 0.06em;
+  font-weight: 700;
+}
