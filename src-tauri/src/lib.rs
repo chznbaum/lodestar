@@ -1,3 +1,4 @@
+mod check;
 mod company;
 mod domain;
 mod job;
@@ -15,7 +16,9 @@ pub fn run() {
             company::create_company,
             company::set_company_status,
             domain::list_domains,
-            job::list_jobs
+            job::list_jobs,
+            check::list_checks,
+            check::get_check
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
