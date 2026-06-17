@@ -1,0 +1,41 @@
+/* Domain picker (.domain-picker block). Sourced from the DomainPicker.svelte
+ * <style> block (Phase C). Per spec §1/§2: block name matches the component;
+ * non-semantic parts are BEM elements (__chips / __chip / __chip-remove). The
+ * rendered <Combobox> is styled by components/combobox.css — not here. */
+
+.domain-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: 0.15rem;
+}
+.domain-picker__chips {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+}
+.domain-picker__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--flat-soft);
+  color: var(--ink-soft);
+  border-radius: var(--r-pill);
+  padding: 0.12rem 0.2rem 0.12rem 0.55rem;
+  font-size: var(--fs-xs);
+}
+.domain-picker__chip-remove {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.domain-picker__chip-remove:hover {
+  color: var(--primary);
+}

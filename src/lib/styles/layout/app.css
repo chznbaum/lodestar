@@ -1,0 +1,76 @@
+/* App shell + nav rail (layout block). Sourced verbatim from the
+ * +layout.svelte <style> block. Generic names namespaced under their block per
+ * spec §6: .content -> .app__content; .brand/.sep/.util -> .rail__brand /
+ * .rail__sep / .rail__util. .navlink keeps its boolean .on / .future toggles
+ * (driven by `class:on` in markup — don't rename out from under the directive).
+ * Token cleanups (§4): .rail__brand color #fff -> var(--rail-ink-active) (same
+ * value); the home-page title font-size resolves to var(--fs-2xl);
+ * .navlink font-size 0.95rem -> var(--fs-md) (0.92rem — imperceptible). */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+  min-height: 100vh;
+}
+.rail {
+  background: var(--rail);
+  color: var(--rail-ink);
+  padding: 0.6rem 0;
+  font-size: var(--fs-sm);
+}
+.rail__brand {
+  color: var(--rail-ink-active);
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  font-variation-settings: "opsz" 72, "wght" 700;
+  line-height: 1.1;
+  padding: 0.3rem 0.55rem 0.7rem;
+}
+.navlink {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 1.05rem;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--rail-ink);
+  text-decoration: none;
+  margin-bottom: 0.1rem;
+}
+.navlink.on {
+  background: var(--rail-ink);
+  color: var(--rail);
+  font-weight: 700;
+}
+.navlink:not(.on):hover {
+  background: var(--rail-hover);
+}
+.navlink.future {
+  color: var(--rail-ink);
+  cursor: default;
+}
+.rail__sep {
+  height: 1px;
+  background: var(--rail-sep);
+  margin: 0.5rem 0.4rem;
+}
+.rail__util {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rail-muted);
+  padding: 0.3rem 0.55rem 0.1rem;
+}
+.app__content {
+  min-width: 0;
+  background: var(--card);
+}
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+  .rail {
+    display: none;
+  }
+}

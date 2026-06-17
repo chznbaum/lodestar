@@ -1,0 +1,15 @@
+/* Monogram logo chip (fallback for company logos). References tokens.css.
+ * Moved from base.css (Phase B). Class name unchanged. */
+
+.monogram {
+  width: var(--monogram-size);
+  height: var(--monogram-size);
+  border-radius: var(--r-md);
+  background: var(--line);
+  display: inline-grid;
+  place-items: center;
+  font-size: var(--monogram-fs);
+  font-weight: 800;
+  color: var(--muted);
+  flex: none;
+}

@@ -1,0 +1,190 @@
+/* Companies list page (layout block). Sourced from the +page.svelte <style>
+ * block (Phase C). Generic names namespaced under their block per spec §6:
+ * .mhead -> .companies__header; .search -> .companies__search (border/padding/
+ * font now come from the global input[type="text"] default — only the layout
+ * extras remain); .secthdr -> .companies__queue-head; .qrow/.qrow-body/.list/
+ * .row/.thead/.col/.mono-col/.meta/.count/.group/.filters/.filter-count/
+ * .prospects-note all BEM-namespaced under .companies. The queue-row `.nm` and
+ * table-row `.name` are unified into one `.company-row__name` (per spec §7).
+ * `.tab__count` (the count inside the Queue tab) lives here; the shared
+ * components/tabs.css `.tab`/`.tabs`/`.tab.on` now style the tabs. The shared
+ * `.sub` atom (feedback.css), `.chip`/`.chip.flat`/`.chip--count` (chip.css),
+ * and the global h1 default apply where the markup references them. */
+
+.companies {
+  padding: 1rem var(--sp-content) 1.2rem;
+  min-width: 0;
+}
+
+/* ── Header ───────────────────────────────────────────── */
+.companies__header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.companies h1 {
+  margin: 0;
+  white-space: nowrap;
+}
+.companies__count {
+  background: var(--accent-ink);
+  color: var(--accent-soft);
+  border-radius: var(--r-pill);
+  padding: 0.12rem 0.5rem;
+  font-weight: 700;
+  font-size: var(--fs-xs);
+}
+.companies__search {
+  flex: 1;
+  min-width: 6rem;
+}
+
+/* ── Tabs ─────────────────────────────────────────────── */
+.tab__count {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+/* ── Filters ──────────────────────────────────────────── */
+.companies__filters {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 0.6rem;
+  font-size: var(--fs-xs);
+}
+.companies__filters .sub {
+  margin-left: auto;
+}
+.companies__filter-count {
+  font-size: var(--fs-xs);
+  margin: 0 0 var(--sp-2);
+}
+
+/* ── Section headers (queue) ──────────────────────────── */
+.companies__queue-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0.55rem 0.15rem 0.45rem;
+  color: var(--ink-soft);
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  border-top: 1px solid var(--line);
+}
+.companies__queue-head:first-of-type {
+  border-top: none;
+}
+.companies__queue-head .btn {
+  margin-left: auto;
+}
+
+/* ── Queue rows ───────────────────────────────────────── */
+.companies__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.companies__qrow {
+  display: grid;
+  grid-template-columns: var(--monogram-size) 1fr auto auto;
+  gap: 0.65rem;
+  align-items: center;
+  padding: var(--sp-row-y) 0.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.companies__qrow.stale {
+  opacity: 0.5;
+}
+.companies__qrow-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.companies__qrow-body:hover .company-row__name {
+  color: var(--primary);
+}
+.companies__qrow .companies__meta {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+/* ── Company name (queue + table rows, unified) ──────── */
+.company-row__name {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-variation-settings: "opsz" 11, "wght" 600;
+  color: var(--ink);
+  line-height: 1.1;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+/* ── All / Domain / Prospects rows ───────────────────── */
+.companies__group {
+  margin: var(--sp-4) 0 var(--sp-1);
+}
+.companies__prospects-note {
+  margin: 0.2rem 0 var(--sp-2);
+  color: var(--primary);
+}
+.companies__thead {
+  display: grid;
+  grid-template-columns: var(--monogram-size) 16rem 1fr 9rem 9rem 7rem auto;
+  gap: var(--sp-4);
+  padding: var(--sp-row-y) 0.2rem;
+  border-bottom: 2px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--faint);
+}
+.companies__thead .companies__col {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0;
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.companies__thead .companies__mono-col {
+  cursor: default;
+}
+.companies__list li {
+  border-bottom: 1px solid var(--line);
+}
+.companies__row {
+  display: grid;
+  grid-template-columns: var(--monogram-size) 16rem 1fr 9rem 9rem 7rem auto;
+  gap: var(--sp-4);
+  align-items: center;
+  width: 100%;
+  padding: var(--sp-row-y) 0.2rem;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+.companies__row:hover {
+  background: var(--card-hover);
+}
+.companies__meta {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}

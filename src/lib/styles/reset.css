@@ -1,0 +1,28 @@
+/* Reset — true resets only (box-sizing, body baseline, base link color,
+ * form-control font inheritance). No layout, no component opinions.
+ * Element DEFAULTS (h1/h2/inputs) live in elements.css, not here. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--primary);
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit; /* font only, no layout */
+}

@@ -1,0 +1,24 @@
+/* Modal shell (.scrim backdrop + .modal). Sourced from CreateCompanyForm's
+ * `.backdrop`/`.modal` <style> rules. Per spec §3/§4 the hardcoded values are
+ * tokenized: the backdrop's rgba(0,0,0,.25) → var(--scrim), and the modal's
+ * box-shadow → var(--shadow-modal). The component markup (`.backdrop`→`.scrim`)
+ * switches onto these names in a later Phase C task. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+}
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(32rem, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: var(--r-lg);
+  padding: var(--sp-5) var(--sp-5);
+  box-shadow: var(--shadow-modal);
+}

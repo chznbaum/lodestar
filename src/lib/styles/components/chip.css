@@ -1,0 +1,23 @@
+/* Chip atoms (.chip + variants). All values reference tokens.css.
+ * Moved from base.css (Phase B). Class names unchanged.
+ * .chip--count reproduces the old .badge look (per spec §7 — .chip.flat plus
+ * font-weight 600 and slightly tighter padding/size); the markup swap from
+ * <span class="badge"> happens in a later (Phase C) task. */
+
+.chip {
+  font-size: var(--fs-xs);
+  border-radius: var(--r-pill);
+  padding: 0.2rem 0.48rem;
+  white-space: nowrap;
+}
+.chip.good { background: var(--good-soft); color: var(--good); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.danger { background: var(--danger-soft); color: var(--danger); }
+.chip.flat { background: var(--flat-soft); color: var(--muted); }
+
+/* old .badge: .chip.flat + tighter padding + 0.7rem + weight 600 */
+.chip--count {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}

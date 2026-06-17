@@ -113,12 +113,11 @@
 
     <p class="crumbs"><a href="/">← Companies</a> / {c.name}</p>
 
-    <header class="whead">
-      <div class="wname-block">
-        <h1 class="wname">{c.name}</h1>
-        <p class="wsub">{[domainResolved.names.join(", "), humanize(c.company_size ?? ""), humanize(c.stage ?? ""), humanize(c.remote_policy ?? ""), c.location].filter(Boolean).join(" · ")}</p>
+    <header class="workspace__header">
+      <div class="workspace__name-block">
+        <h1 class="workspace__name">{c.name}</h1>
+        <p class="workspace__sub">{[domainResolved.names.join(", "), humanize(c.company_size ?? ""), humanize(c.stage ?? ""), humanize(c.remote_policy ?? ""), c.location].filter(Boolean).join(" · ")}</p>
       </div>
-      <span class="spacer"></span>
       {#if c.screening}
         {#if c.screening === "dealbreaker"}
           <span class="chip danger">{c.screening}</span>
@@ -128,7 +127,7 @@
       {:else}
         <span class="chip good">no flags</span>
       {/if}
-      <div class="wactions">
+      <div class="workspace__actions">
         {#if c.website}<a class="btn sm" href={c.website} target="_blank" rel="noreferrer">website ↗</a>{/if}
         {#if c.careers_url}<a class="btn sm" href={c.careers_url} target="_blank" rel="noreferrer">careers ↗</a>{/if}
         <button class="btn sm danger" onclick={remove}>Remove…</button>
@@ -145,19 +144,18 @@
       />
       <span class="sub">last checked: {c.last_checked ?? "never checked"}</span>
       <button class="linkbtn" onclick={() => cs.markChecked(c.slug)}>mark checked</button>
-      <span class="spacer"></span>
       <button class="btn sm" disabled title="Fetch arrives in a later phase">Fetch jobs</button>
     </div>
 
     <div class="tabs">
-      <button class="t" class:on={wtab === "overview"} onclick={() => (wtab = "overview")}>Overview</button>
-      <button class="t" class:on={wtab === "roles"} onclick={() => (wtab = "roles")}>Roles</button>
-      <button class="t" class:on={wtab === "activity"} onclick={() => (wtab = "activity")}>Activity</button>
+      <button class="tab" class:on={wtab === "overview"} onclick={() => (wtab = "overview")}>Overview</button>
+      <button class="tab" class:on={wtab === "roles"} onclick={() => (wtab = "roles")}>Roles</button>
+      <button class="tab" class:on={wtab === "activity"} onclick={() => (wtab = "activity")}>Activity</button>
     </div>
 
     {#if wtab === "overview"}
       <section class="panel">
-        <div class="ph">Roles found</div>
+        <div class="panel__head">Roles found</div>
         {#if !c.last_checked}
           <p class="empty">Not fetched yet — "Fetch jobs" will list matching roles here.</p>
         {:else}
@@ -166,7 +164,7 @@
       </section>
 
       <section class="panel">
-        <div class="ph">
+        <div class="panel__head">
           <span>Notes <span class="sub">rendered markdown</span></span>
           <button class="linkbtn" onclick={() => (editingNotes = !editingNotes)}>{editingNotes ? "reject" : "edit"}</button>
         </div>
@@ -182,7 +180,7 @@
       </section>
 
       <section class="panel">
-        <div class="ph">
+        <div class="panel__head">
           Details
           {#if editingDetails}
             <span>
@@ -194,39 +192,39 @@
           {/if}
         </div>
         {#if editingDetails}
-          <div class="pb">
-            <div class="detail-edit">
-              <span class="de-label">Domain</span>
+          <div class="panel__body">
+            <div class="detail-field">
+              <span class="detail-field__label">Domain</span>
               <DomainPicker bind:value={domainDraft} />
 
-              <label class="de-label" for="de-business_model">Model</label>
-              <input id="de-business_model" class="de-input" type="text" bind:value={detailDraft.business_model} placeholder="e.g. saas, marketplace" />
+              <label class="detail-field__label" for="de-business_model">Model</label>
+              <input id="de-business_model" type="text" bind:value={detailDraft.business_model} placeholder="e.g. saas, marketplace" />
 
-              <label class="de-label" for="de-company_size">Size</label>
+              <label class="detail-field__label" for="de-company_size">Size</label>
               <Combobox id="de-company_size" placeholder="Size" bind:value={detailDraft.company_size} options={sizeOptions} />
-              <label class="de-label" for="de-stage">Stage</label>
+              <label class="detail-field__label" for="de-stage">Stage</label>
               <Combobox id="de-stage" placeholder="Stage" bind:value={detailDraft.stage} options={stageOptions} />
-              <label class="de-label" for="de-remote_policy">Remote</label>
+              <label class="detail-field__label" for="de-remote_policy">Remote</label>
               <Combobox id="de-remote_policy" placeholder="Remote" bind:value={detailDraft.remote_policy} options={remoteOptions} />
 
-              <label class="de-label" for="de-location">Location</label>
-              <input id="de-location" class="de-input" type="text" bind:value={detailDraft.location} />
+              <label class="detail-field__label" for="de-location">Location</label>
+              <input id="de-location" type="text" bind:value={detailDraft.location} />
 
-              <label class="de-label" for="de-website">Website</label>
-              <input id="de-website" class="de-input" type="text" bind:value={detailDraft.website} />
+              <label class="detail-field__label" for="de-website">Website</label>
+              <input id="de-website" type="text" bind:value={detailDraft.website} />
 
-              <label class="de-label" for="de-careers_url">Careers</label>
-              <input id="de-careers_url" class="de-input" type="text" bind:value={detailDraft.careers_url} />
+              <label class="detail-field__label" for="de-careers_url">Careers</label>
+              <input id="de-careers_url" type="text" bind:value={detailDraft.careers_url} />
 
-              <label class="de-label" for="de-domain_raw">Domain (raw)</label>
-              <input id="de-domain_raw" class="de-input" type="text" bind:value={detailDraft.domain_raw} />
+              <label class="detail-field__label" for="de-domain_raw">Domain (raw)</label>
+              <input id="de-domain_raw" type="text" bind:value={detailDraft.domain_raw} />
 
-              <label class="de-label" for="de-source">Source</label>
-              <input id="de-source" class="de-input" type="text" bind:value={detailDraft.source} />
+              <label class="detail-field__label" for="de-source">Source</label>
+              <input id="de-source" type="text" bind:value={detailDraft.source} />
             </div>
           </div>
         {:else}
-          <div class="pb">
+          <div class="panel__body">
             <dl class="meta-grid">
               <dt>Domain</dt><dd>{domainResolved.names.join(", ") || "—"}{#if c.domain_raw}&nbsp;<span class="sub-sm">({c.domain_raw})</span>{/if}{#if domainResolved.unknown.length}<span class="domain-error">⚠ unknown domain: {domainResolved.unknown.join(", ")} — no note in jobsearch-vault/domains/</span>{/if}</dd>
               <dt>Model</dt><dd>{humanizeList(c.business_model) || "—"}</dd>
@@ -234,9 +232,9 @@
               <dt>Stage</dt><dd>{humanize(c.stage ?? "") || "—"}</dd>
               <dt>Remote</dt><dd>{humanize(c.remote_policy ?? "") || "—"}</dd>
               <dt>Location</dt><dd>{c.location ?? "—"}</dd>
-              <dt>Website</dt><dd style="font-family: monospace;">{c.website ?? "—"}</dd>
-              <dt>Careers</dt><dd style="font-family: monospace;">{c.careers_url ?? "—"}</dd>
-              <dt>Source</dt><dd style="font-family: monospace;">{c.source ?? "—"}</dd>
+              <dt>Website</dt><dd class="mono">{c.website ?? "—"}</dd>
+              <dt>Careers</dt><dd class="mono">{c.careers_url ?? "—"}</dd>
+              <dt>Source</dt><dd class="mono">{c.source ?? "—"}</dd>
             </dl>
           </div>
         {/if}
@@ -245,7 +243,7 @@
 
     {#if wtab === "roles"}
       <section class="panel">
-        <div class="ph">Roles found</div>
+        <div class="panel__head">Roles found</div>
         {#if !c.last_checked}
           <p class="empty">Not fetched yet — "Fetch jobs" will list matching roles here.</p>
         {:else}
@@ -256,218 +254,9 @@
 
     {#if wtab === "activity"}
       <section class="panel">
-        <div class="ph">Activity</div>
+        <div class="panel__head">Activity</div>
         <p class="empty">Check history appears here once the pipeline runs (Phase 3+).</p>
       </section>
     {/if}
   {/if}
 </div>
-
-<style>
-  /* ── layout wrapper ── */
-  .workspace {
-    padding: 1rem var(--sp-content) 1.2rem;
-  }
-
-  /* ── breadcrumbs ── */
-  .crumbs {
-    font-size: var(--fs-xs);
-    color: var(--muted);
-    margin: 0 0 var(--sp-2);
-  }
-  .crumbs a {
-    color: var(--primary);
-    text-decoration: none;
-  }
-
-  /* ── header ── */
-  .whead {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--sp-3);
-    flex-wrap: wrap;
-  }
-  .wname-block {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: var(--sp-2);
-  }
-  .wname {
-    font-family: var(--font-display);
-    font-size: var(--fs-wname);
-    font-weight: 700;
-    font-variation-settings: "opsz" 72, "wght" 700;
-    margin: 0;
-    line-height: 1.2;
-  }
-  .wsub {
-    width: 100%;
-    color: var(--muted);
-    font-size: var(--fs-sm);
-    margin: 0.1rem 0 0;
-  }
-  .spacer { flex: 1; }
-  .wactions {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    flex-wrap: wrap;
-  }
-
-  /* ── status bar ── */
-  .statusbar {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-3);
-    margin: 0.7rem 0 0.2rem;
-    flex-wrap: wrap;
-    font-size: var(--fs-sm);
-  }
-  .sub {
-    color: var(--faint);
-    font-size: var(--fs-xs);
-  }
-
-  span .sub {
-    margin-left: 0.5rem;
-  }
-
-  .sub-sm {
-    font-size: var(--fs-xs);
-  }
-
-  .domain-error {
-    display: block;
-    color: var(--danger);
-    font-size: var(--fs-xs);
-    margin-top: 0.15rem;
-  }
-
-  /* ── tabs ── */
-  .tabs {
-    display: flex;
-    gap: var(--sp-1);
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 0.6rem;
-  }
-  .t {
-    font-size: var(--fs-sm);
-    padding: 0.32rem 0.6rem;
-    color: var(--muted);
-    border: none;
-    border-bottom: 2px solid transparent;
-    background: none;
-    cursor: pointer;
-    font: inherit;
-    font-size: var(--fs-sm);
-    line-height: 1.5;
-    margin-bottom: -1px;
-  }
-  .t.on {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-    font-weight: 700;
-  }
-
-  /* ── card panels ── */
-  .panel {
-    border: 1px solid var(--line);
-    border-radius: var(--r-panel);
-    margin-top: var(--sp-3);
-    overflow: hidden;
-  }
-  .ph {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.5rem 0.75rem;
-    background: var(--panel-head);
-    border-bottom: 1px solid var(--line);
-    font-weight: 600;
-    font-size: var(--fs-panel-head);
-    color: var(--ink);
-  }
-  .pb {
-    padding: 0.7rem 0.8rem;
-  }
-  .panel .empty {
-    color: var(--faint);
-    font-size: var(--fs-sm);
-    padding: var(--sp-2) 0.7rem;
-    margin: 0;
-  }
-
-  /* ── notes ── */
-  .notes {
-    padding: var(--sp-2) 0.8rem;
-    font-family: var(--font-body);
-    font-size: var(--fs-panel-body);
-    color: var(--ink-soft);
-  }
-  .notes :global(p) { margin: 0.4rem 0; }
-  .notes :global(p:first-child) { margin-top: 0; }
-  .notes :global(ul) { margin: 0.4rem 0; padding-left: 1.1rem; }
-  .notes-edit {
-    display: block;
-    width: 100%;
-    min-height: 8rem;
-    font: inherit;
-    font-size: var(--fs-sm);
-    padding: var(--sp-2);
-    border: none;
-    border-bottom: 1px solid var(--line);
-    box-sizing: border-box;
-    resize: vertical;
-  }
-  .notes-save-row {
-    padding: var(--sp-2) 0.7rem;
-  }
-
-  /* ── details dl ── */
-  .meta-grid {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.7rem 1.1rem;
-    font-size: var(--fs-md);
-    margin: 0;
-    align-items: baseline;
-  }
-  .meta-grid dt {
-    color: var(--muted);
-    font-size: var(--fs-sm);
-  }
-  .meta-grid dd {
-    margin: 0;
-    font-family: var(--font-body);
-    color: var(--ink);
-  }
-
-  /* ── details edit form ── */
-  .detail-edit {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.35rem 0.75rem;
-    align-items: center;
-  }
-  .de-label {
-    font-size: var(--fs-sm);
-    color: var(--faint);
-    white-space: nowrap;
-  }
-  .de-input {
-    font: inherit;
-    font-size: var(--fs-sm);
-    padding: 0.22rem var(--sp-2);
-    border: 1px solid var(--wire);
-    border-radius: var(--r-md);
-    background: var(--card);
-    color: var(--ink);
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .de-input:focus {
-    outline: none;
-    border-color: var(--primary);
-  }
-</style>

@@ -1,0 +1,31 @@
+/* Card panel (.panel + parts + empty state). Sourced verbatim from [slug]'s
+ * `.panel`/`.ph`/`.pb`/`.panel .empty` <style> rules, BEM-renamed `.ph`→
+ * `.panel__head` and `.pb`→`.panel__body` (per spec §1/§2). The [slug] markup
+ * switches onto these names in a later Phase C task. */
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-panel);
+  margin-top: var(--sp-3);
+  overflow: hidden;
+}
+.panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel-head);
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+  color: var(--ink);
+}
+.panel__body {
+  padding: 0.7rem 0.8rem;
+}
+.panel .empty {
+  color: var(--faint);
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) 0.7rem;
+  margin: 0;
+}

@@ -1,0 +1,155 @@
+/* Company detail page (.workspace layout block). Sourced from the
+ * companies/[slug]/+page.svelte <style> block (Phase C). Per spec §1/§2/§6/§7:
+ *   .whead -> .workspace__header; .wname -> .workspace__name (an <h1> — the
+ *   global h1 default now styles its font; only layout margin/line-height kept,
+ *   weight 700->600 / opsz unified per §5); .wsub -> .workspace__sub;
+ *   .wactions -> .workspace__actions; .wname-block -> .workspace__name-block.
+ * The shared components style the rest: tabs.css (.tabs/.tab/.tab.on),
+ * panel.css (.panel/.panel__head/.panel__body/.panel .empty), feedback.css
+ * (.sub atom; markup uses class="sub"). The global input[type="text"]/textarea
+ * defaults style the detail-edit inputs and the notes editor (now bordered) —
+ * their per-component border/padding/font rules are gone. Generics namespaced
+ * under the block: .crumbs/.statusbar/.meta-grid/.notes/.notes-save-row/
+ * .notes-edit/.detail-field/.detail-field__label/.sub-sm/.domain-error.
+ * Filler <span class="spacer"> removed; margin-left:auto on the real adjacent
+ * element. The three monospace <dd>s use class="mono" -> .meta-grid dd.mono.
+ * NOTE: the old `span .sub` rule was NOT dead — it styled the nested "rendered
+ * markdown" caption in the Notes panel head; kept as `.panel__head span .sub`. */
+
+/* ── layout wrapper ── */
+.workspace {
+  padding: 1rem var(--sp-content) 1.2rem;
+}
+
+/* ── breadcrumbs ── */
+.crumbs {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  margin: 0 0 var(--sp-2);
+}
+.crumbs a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+/* ── header ── */
+.workspace__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.workspace__name-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  /* Replaces the removed `<span class="spacer">` filler: pushes the screening
+   * chip + actions group to the right edge of the wrapping header. */
+  margin-right: auto;
+}
+/* .workspace__name is an <h1>: font comes from the global h1 default (§5);
+ * only layout (margin / line-height) remains here. */
+.workspace__name {
+  margin: 0;
+  line-height: 1.2;
+}
+.workspace__sub {
+  width: 100%;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin: 0.1rem 0 0;
+}
+.workspace__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ── status bar ── */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0.7rem 0 0.2rem;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
+.statusbar .btn {
+  margin-left: auto;
+}
+
+/* The "rendered markdown" caption inside the Notes panel head — a .sub nested
+ * in the heading <span>. Preserves the original `span .sub` left margin (the
+ * audit flagged this rule as dead, but it actually styles this nested label;
+ * the statusbar's .sub is a direct child of .statusbar, never matched it). */
+.panel__head span .sub {
+  margin-left: 0.5rem;
+}
+
+.sub-sm {
+  font-size: var(--fs-xs);
+}
+
+.domain-error {
+  display: block;
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  margin-top: 0.15rem;
+}
+
+/* ── notes ── */
+.notes {
+  padding: var(--sp-2) 0.8rem;
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  color: var(--ink-soft);
+}
+.notes p { margin: 0.4rem 0; }
+.notes p:first-child { margin-top: 0; }
+.notes ul { margin: 0.4rem 0; padding-left: 1.1rem; }
+/* .notes-edit is a <textarea>: border/padding/font from the global textarea
+ * default (§5/§6) — now a normal bordered control; only layout kept here. */
+.notes-edit {
+  min-height: 8rem;
+  resize: vertical;
+}
+.notes-save-row {
+  padding: var(--sp-2) 0.7rem;
+}
+
+/* ── details dl ── */
+.meta-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem 1.1rem;
+  font-size: var(--fs-md);
+  margin: 0;
+  align-items: baseline;
+}
+.meta-grid dt {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.meta-grid dd {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--ink);
+}
+.meta-grid dd.mono {
+  font-family: monospace;
+}
+
+/* ── details edit form ── */
+.detail-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+}
+.detail-field__label {
+  font-size: var(--fs-sm);
+  color: var(--faint);
+  white-space: nowrap;
+}

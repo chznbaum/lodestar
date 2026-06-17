@@ -1,0 +1,28 @@
+/* Stylesheet entry point — @imports everything in cascade order.
+ * Vite inlines these @imports. +layout.svelte imports ONLY this file (plus the
+ * @fontsource packages). Cascade order: tokens -> reset -> elements ->
+ * components -> layout. Source order lets layout override components at equal
+ * specificity; rely on that only for intentional cases. See CONVENTIONS.md. */
+
+@import "./tokens.css"; /* variables only — no output */
+@import "./reset.css"; /* resets */
+@import "./elements.css"; /* global element defaults (h1 / h2 / inputs) */
+
+/* components — shared, reusable design-system atoms (after elements, before
+ * layout). Order per spec §3. */
+@import "./components/button.css";
+@import "./components/chip.css";
+@import "./components/monogram.css";
+@import "./components/tabs.css";
+@import "./components/panel.css";
+@import "./components/combobox.css";
+@import "./components/modal.css";
+@import "./components/feedback.css";
+
+/* layout — per-surface blocks (after components). Phase C appends here in order:
+ * app -> companies -> workspace -> create-form -> domain-picker. */
+@import "./layout/app.css";
+@import "./layout/companies.css";
+@import "./layout/workspace.css";
+@import "./layout/create-form.css";
+@import "./layout/domain-picker.css";

@@ -1,0 +1,35 @@
+/* Button atoms (.btn + variants, .linkbtn). All values reference tokens.css.
+ * Moved from base.css (Phase B). Class names unchanged. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--wire);
+  border-radius: var(--r-md);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  cursor: pointer;
+}
+.btn:hover { background: var(--card-hover); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.btn.primary:hover { background: var(--primary-hover); }
+.btn.ghost { border-style: dashed; color: var(--muted); }
+.btn.danger { color: var(--danger); border-color: var(--danger-border); }
+.btn.sm { padding: 0.26rem 0.55rem; font-size: var(--fs-xs); }
+.btn:disabled { color: var(--faint); border-color: var(--line); background: var(--card); cursor: default; }
+.btn:disabled:hover { background: var(--card); }
+
+.linkbtn {
+  border: none;
+  background: none;
+  color: var(--primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 0;
+}

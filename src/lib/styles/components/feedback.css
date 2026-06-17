@@ -1,0 +1,13 @@
+/* Text-feedback atoms (.hint, .error, .sub). References tokens.css.
+ * .hint/.error moved from base.css (Phase B). .sub is the unified atom built
+ * from the two near-identical scoped copies in +page.svelte and
+ * companies/[slug]/+page.svelte (common form: faint color, --fs-xs). It stays
+ * dormant — the components' scoped .sub still wins — until Phase C. */
+
+.hint { color: var(--muted); }
+.error { color: var(--danger); }
+
+.sub {
+  color: var(--faint);
+  font-size: var(--fs-xs);
+}

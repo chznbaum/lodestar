@@ -1,0 +1,60 @@
+/* Create-company modal form (.create-form block). Sourced from the
+ * CreateCompanyForm.svelte <style> block (Phase C). Per spec §1/§2/§5/§6/§7:
+ *   the modal shell (.backdrop/.modal) is now the shared modal.css (.scrim +
+ *   .modal); the dialog div carries `class="modal create-form"` so the
+ *   form-specific rules below scope under .create-form.
+ *   h2 -> global h2 default (gains weight 600 + ink-soft); only its margin kept
+ *   as .create-form h2. The bare inputs/textarea get explicit type="text"/"url"
+ *   so the global input[type=...]/textarea defaults style them; their
+ *   per-component border/padding/font rule is gone. .create-form textarea keeps
+ *   only min-height/resize. Form labels stay block-scoped (.create-form label,
+ *   §6). Generics namespaced/BEM'd under the block: .field -> .create-form__field,
+ *   .flabel -> .create-form__flabel, .actions -> .create-form__actions. The
+ *   modal's .hint margin-override -> .create-form .hint so it doesn't fight the
+ *   shared .hint atom (feedback.css). */
+
+.create-form h2 {
+  margin: 0 0 var(--sp-1);
+}
+
+.create-form .hint {
+  margin: 0 0 var(--sp-3);
+}
+
+.create-form label {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  margin-bottom: 0.55rem;
+}
+
+/* Small gap between a label's text and its field (was the deleted per-component
+ * input rule's margin-top). Block-context layout, not a restyle of the control. */
+.create-form label input,
+.create-form label textarea {
+  margin-top: 0.15rem;
+}
+
+.create-form textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.create-form__field {
+  display: block;
+  margin-bottom: 0.55rem;
+}
+
+.create-form__flabel {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+
+.create-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}

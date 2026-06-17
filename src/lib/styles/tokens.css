@@ -51,17 +51,14 @@
   --font-body: "Lora", Georgia, serif;             /* prose / notes */
   --font-sans: "Spline Sans", -apple-system, system-ui, sans-serif; /* UI */
 
-  /* type scale (raised to mockup scale) */
+  /* type scale (positional t-shirt scale) */
+  --fs-2xs: 0.66rem;         /* combobox kbd-hint / footer micro-text */
   --fs-xs: 0.74rem;
   --fs-sm: 0.82rem;
   --fs-md: 0.92rem;
   --fs-lg: 1.05rem;
   --fs-xl: 1.4rem;
-  --fs-co: 1.04rem;          /* company names */
-  --fs-mhead: 1.5rem;        /* home page title */
-  --fs-wname: 1.5rem;        /* workspace title */
-  --fs-panel-head: 0.78rem;
-  --fs-panel-body: 0.92rem;
+  --fs-2xl: 1.5rem;          /* h1 / hero / rail brand */
 
   /* monogram */
   --monogram-size: 2rem;
@@ -87,4 +84,24 @@
   /* layout */
   --rail-w: 9.5rem;
   --content-max: 1040px;
+
+  /* elevation — replaces hardcoded rgba shadows */
+  --shadow-pop:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 18px 44px -16px rgba(40, 15, 30, 0.42),
+    0 4px 12px -8px rgba(40, 15, 30, 0.3);          /* combobox popover */
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.2);    /* create modal */
+
+  /* overlay scrim — replaces rgba(0,0,0,.25) backdrop */
+  --scrim: rgba(0, 0, 0, 0.25);
+
+  /* z-index scale */
+  --z-rail: 10;
+  --z-modal: 100;
+  --z-popover: 1000;     /* combobox currently hardcodes 1000 */
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);   /* the combobox-pop easing */
+  --transition-fast: 0.12s;
+  --transition: 0.14s;
 }

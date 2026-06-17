@@ -62,36 +62,23 @@
 </script>
 
 <svelte:window onkeydown={(e) => { if (e.key === "Escape") onclose(); }} />
-<div class="backdrop" onclick={onclose} role="presentation"></div>
-<div class="modal" role="dialog" aria-modal="true" aria-label="Add company">
+<div class="scrim" onclick={onclose} role="presentation"></div>
+<div class="modal create-form" role="dialog" aria-modal="true" aria-label="Add company">
   <h2>Add company</h2>
   <p class="hint">Pick domains from the list. Business model is a raw slug (e.g. <code>b2b</code>). Web-research auto-fill arrives in a later phase.</p>
   {#if error}<p class="error">{error}</p>{/if}
-  <label>Name<input bind:value={name} placeholder="Acme, Inc." /></label>
-  <label>Website<input bind:value={website} placeholder="https://…" /></label>
-  <label>Careers URL<input bind:value={careers_url} placeholder="https://…/careers" /></label>
-  <div class="field"><span class="flabel">Domain(s)</span><DomainPicker bind:value={domain} /></div>
-  <label>Business model(s)<input bind:value={business_model} placeholder="b2b" /></label>
-  <div class="field"><span class="flabel">Size</span><Combobox placeholder="Size" bind:value={company_size} options={sizeOpts} /></div>
-  <div class="field"><span class="flabel">Stage</span><Combobox placeholder="Stage" bind:value={stage} options={stageOpts} /></div>
-  <div class="field"><span class="flabel">Remote</span><Combobox placeholder="Remote" bind:value={remote_policy} options={remoteOpts} /></div>
-  <label>Location<input bind:value={location} placeholder="Remote, US" /></label>
+  <label>Name<input type="text" bind:value={name} placeholder="Acme, Inc." /></label>
+  <label>Website<input type="url" bind:value={website} placeholder="https://…" /></label>
+  <label>Careers URL<input type="url" bind:value={careers_url} placeholder="https://…/careers" /></label>
+  <div class="create-form__field"><span class="create-form__flabel">Domain(s)</span><DomainPicker bind:value={domain} /></div>
+  <label>Business model(s)<input type="text" bind:value={business_model} placeholder="b2b" /></label>
+  <div class="create-form__field"><span class="create-form__flabel">Size</span><Combobox placeholder="Size" bind:value={company_size} options={sizeOpts} /></div>
+  <div class="create-form__field"><span class="create-form__flabel">Stage</span><Combobox placeholder="Stage" bind:value={stage} options={stageOpts} /></div>
+  <div class="create-form__field"><span class="create-form__flabel">Remote</span><Combobox placeholder="Remote" bind:value={remote_policy} options={remoteOpts} /></div>
+  <label>Location<input type="text" bind:value={location} placeholder="Remote, US" /></label>
   <label>Notes<textarea bind:value={notes} placeholder="Why listed…"></textarea></label>
-  <div class="actions">
+  <div class="create-form__actions">
     <button class="btn" onclick={onclose}>Cancel</button>
     <button class="btn primary" disabled={saving} onclick={submit}>{saving ? "Creating…" : "Create"}</button>
   </div>
 </div>
-
-<style>
-  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.25); }
-  .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(32rem, 92vw); max-height: 88vh; overflow-y: auto; background: var(--card); border-radius: var(--r-lg); padding: var(--sp-5) var(--sp-5); box-shadow: 0 12px 40px rgba(0,0,0,.2); }
-  h2 { margin: 0 0 var(--sp-1); font-size: var(--fs-lg); }
-  .hint { margin: 0 0 var(--sp-3); }
-  label { display: block; font-size: var(--fs-sm); color: var(--muted); margin-bottom: .55rem; }
-  input, textarea { width: 100%; box-sizing: border-box; padding: .4rem .55rem; border: 1px solid var(--wire); border-radius: var(--r-md); font: inherit; font-size: var(--fs-md); color: var(--ink); background: var(--card); margin-top: .15rem; }
-  textarea { min-height: 5rem; resize: vertical; }
-  .actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
-  .field { display: block; margin-bottom: 0.55rem; }
-  .flabel { display: block; font-size: var(--fs-sm); color: var(--muted); margin-bottom: 0.15rem; }
-</style>

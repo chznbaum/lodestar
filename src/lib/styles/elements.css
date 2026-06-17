@@ -1,0 +1,38 @@
+/* Global element defaults — a small, deliberate set of semantic-element
+ * baselines (h1, h2, canonical text inputs/textarea). Block contexts add only
+ * layout (margin / line-height / flex) on top of these; they do NOT restyle the
+ * element. New per-component input/heading rules should not exist — extend here. */
+
+h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  font-variation-settings: "opsz" 72, "wght" 600;
+}
+
+h2 {
+  /* modeled on the in-list group h2 */
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* canonical text input — standardized on the header search control */
+input[type="text"],
+input[type="url"],
+textarea {
+  width: 100%;
+  border: 1px solid var(--wire);
+  border-radius: var(--r-md);
+  background: var(--card);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  padding: 0.32rem 0.6rem;
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus,
+textarea:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}

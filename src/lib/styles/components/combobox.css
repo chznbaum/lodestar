@@ -1,0 +1,333 @@
+/* Combobox — trigger + portaled popover.
+ *
+ * The popover (.cbx-pop) is portaled to <body> via use:portal, so its rules
+ * MUST be global. In the component these were wrapped in a global() escape; here the
+ * whole file is a plain global stylesheet, so the wrappers are gone but the
+ * full .cbx-pop qualification is kept verbatim. The trigger rules (.cbx,
+ * .cbx-trigger, …) were component-scoped; they're all cbx-prefixed and so are
+ * collision-safe as plain global selectors. @keyframes cbx-pop lives here. */
+
+.cbx {
+  position: relative;
+  font-family: var(--font-sans);
+  display: inline-block;
+  min-width: 12rem;
+}
+
+/* --- closed trigger --- */
+.cbx-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 0.4rem 0.65rem;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--wire);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.2;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+.cbx-trigger:hover {
+  background: var(--card-hover);
+  border-color: var(--primary);
+}
+.cbx-trigger .lab {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cbx-trigger .lab .key {
+  color: var(--muted);
+  font-weight: 600;
+}
+.cbx-trigger .lab .val {
+  color: var(--ink);
+  font-weight: 600;
+}
+.cbx-trigger.is-any .lab .val {
+  color: var(--faint);
+  font-weight: 500;
+  font-style: italic;
+}
+.cbx-trigger .clear {
+  flex: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  background: transparent;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.cbx-trigger .clear:hover {
+  background: var(--flat-soft);
+  color: var(--primary);
+}
+.cbx-trigger .chev {
+  flex: none;
+  color: var(--primary);
+  font-size: 1.2rem;
+  line-height: 1.2;
+  transition: transform 0.16s ease;
+}
+.cbx.open .cbx-trigger .chev {
+  transform: rotate(180deg);
+}
+
+.cbx-trigger:focus-visible,
+.cbx.open .cbx-trigger {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+  background: var(--card);
+}
+
+/* --- popover (portaled to body, position:fixed) --- */
+.cbx-pop {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 12rem;
+  width: var(--cbx-w);
+  max-width: 22rem;
+  font-family: var(--font-sans);
+  background: var(--card);
+  border: 1px solid var(--wire);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  transform-origin: top left;
+  animation: cbx-pop var(--transition) var(--ease);
+}
+/* when flipped above, anchor the bottom edge to `top` */
+.cbx-pop.above {
+  transform: translateY(-100%);
+  transform-origin: bottom left;
+}
+@keyframes cbx-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.cbx-pop .cbx-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-head);
+}
+.cbx-pop .cbx-search .ico {
+  color: var(--primary);
+  font-size: 0.85rem;
+  flex: none;
+  line-height: 1;
+}
+.cbx-pop .cbx-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--ink);
+  padding: 0.05rem 0;
+}
+.cbx-pop .cbx-search input::placeholder {
+  color: var(--faint);
+  font-weight: 400;
+}
+.cbx-pop .cbx-search .kbd {
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+  border: 1px solid var(--wire);
+  border-radius: 5px;
+  padding: 0.04rem 0.26rem;
+  background: var(--card);
+  white-space: nowrap;
+}
+
+.cbx-pop .cbx-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.cbx-pop .cbx-opt {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.42rem 0.55rem 0.42rem 0.6rem;
+  border-radius: var(--r-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  line-height: 1.25;
+}
+.cbx-pop .cbx-opt .otext {
+  flex: 1;
+  min-width: 0;
+}
+.cbx-pop .cbx-opt .otext .cbx-opt__note {
+  color: var(--faint);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.cbx-pop .cbx-opt .raw {
+  color: var(--faint);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  margin-left: 0.05rem;
+}
+.cbx-pop .cbx-opt mark {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-radius: 3px;
+  padding: 0 0.06em;
+  font-weight: 700;
+}
+
+/* active (keyboard / hover) row */
+.cbx-pop .cbx-opt.active {
+  background: var(--primary-soft);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--primary-ring);
+}
+
+/* selected row */
+.cbx-pop .cbx-opt.selected {
+  color: var(--primary);
+  font-weight: 700;
+}
+.cbx-pop .cbx-opt .dot {
+  flex: none;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--primary);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.cbx-pop .cbx-opt.selected .dot {
+  opacity: 1;
+}
+
+/* the pinned "any / clear" row */
+.cbx-pop .cbx-opt.any {
+  color: var(--muted);
+  font-style: italic;
+}
+.cbx-pop .cbx-opt.any .aster {
+  color: var(--faint);
+  font-size: 0.8rem;
+  line-height: 1;
+  width: 0.9rem;
+  text-align: center;
+  flex: none;
+}
+.cbx-pop .cbx-opt.any.selected {
+  color: var(--primary);
+  font-style: italic;
+  font-weight: 700;
+}
+.cbx-pop .cbx-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 0.3rem 0.2rem;
+}
+
+/* no-matches empty state */
+.cbx-pop .cbx-empty {
+  padding: 1.15rem 0.8rem 1.3rem;
+  text-align: center;
+  color: var(--muted);
+}
+.cbx-pop .cbx-empty .ico {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 0.5rem;
+  background: var(--flat-soft);
+  color: var(--faint);
+  font-size: 0.9rem;
+}
+.cbx-pop .cbx-empty .ttl {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.cbx-pop .cbx-empty .ttl q {
+  color: var(--primary);
+  font-style: normal;
+  font-weight: 700;
+}
+.cbx-pop .cbx-empty .cbx-opt__note {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  color: var(--faint);
+  margin-top: 0.2rem;
+}
+.cbx-pop .cbx-empty .clearbtn {
+  margin-top: 0.7rem;
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-ring);
+  border-radius: var(--r-pill);
+  padding: 0.26rem 0.7rem;
+  cursor: pointer;
+}
+.cbx-pop .cbx-empty .clearbtn:hover {
+  background: var(--primary-soft);
+}
+
+/* footer count */
+.cbx-pop .cbx-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel-head);
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+}
+.cbx-pop .cbx-foot b {
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+.cbx-pop .cbx-foot .spacer {
+  flex: 1;
+}

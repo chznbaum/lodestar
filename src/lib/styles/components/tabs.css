@@ -1,0 +1,32 @@
+/* Tab atoms (.tabs container + .tab, .tab.on active state). Unifies the two
+ * divergent copies — +page's `.tab` and [slug]'s `.t` (per spec §7). Canonical
+ * name is .tab (the [slug] markup renames `.t`→`.tab` in a later Phase C task).
+ * Kept the cleaner +page `.tab`: the `.t` copy only added a redundant duplicate
+ * `font-size` and a `line-height: 1.5` — dropped both. .tabs is identical in
+ * both sources. Sourced verbatim from the component <style> blocks. */
+
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.6rem;
+}
+.tab {
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 0.4rem 0.6rem;
+  color: var(--muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-bottom: -1px;
+}
+.tab.on {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 700;
+}
