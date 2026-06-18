@@ -16,6 +16,7 @@
   const onCompanies = $derived(
     page.url.pathname === "/" || page.url.pathname.startsWith("/companies"),
   );
+  const onChecks = $derived(page.url.pathname.startsWith("/checks"));
 </script>
 
 <div class="app">
@@ -29,7 +30,7 @@
     <span class="navlink future">Patterns</span>
     <div class="rail__sep"></div>
     <div class="rail__util">Diagnostics</div>
-    <span class="navlink future">Checks</span>
+    <a class="navlink" class:on={onChecks} href="/checks">Checks</a>
   </nav>
 
   <div class="app__content">
