@@ -4,6 +4,8 @@ mod config;
 mod domain;
 mod job;
 mod note;
+mod sanitize;
+mod scraper;
 mod secrets;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
