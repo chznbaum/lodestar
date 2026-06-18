@@ -3,6 +3,7 @@ mod company;
 mod domain;
 mod job;
 mod note;
+mod secrets;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,7 +19,9 @@ pub fn run() {
             domain::list_domains,
             job::list_jobs,
             check::list_checks,
-            check::get_check
+            check::get_check,
+            secrets::set_secret,
+            secrets::secret_present
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
