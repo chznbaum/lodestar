@@ -1,6 +1,6 @@
 <script lang="ts">
   import { companiesStore as cs } from "$lib/companies.svelte";
-  import type { NewCompany } from "$lib/vault";
+  import type { NewCompany } from "$lib/company";
   import Combobox from "$lib/Combobox.svelte";
   import DomainPicker from "$lib/DomainPicker.svelte";
   import { humanize } from "$lib/labels";

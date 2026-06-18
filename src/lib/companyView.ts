@@ -1,4 +1,4 @@
-import type { Company } from "./vault";
+import type { Company } from "./company";
 
 export type SortKey = "name" | "company_size" | "stage" | "last_checked";
 

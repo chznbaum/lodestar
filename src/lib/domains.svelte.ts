@@ -1,4 +1,4 @@
-import { listDomains, type Domain } from "$lib/vault";
+import { listDomains, type Domain } from "$lib/domain";
 
 let domains = $state<Domain[]>([]);
 let loadedPath = $state<string | null>(null);

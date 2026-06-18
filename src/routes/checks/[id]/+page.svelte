@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { companiesStore as cs } from "$lib/companies.svelte";
-  import { getCheck, type Check } from "$lib/checks";
+  import { getCheck, type Check } from "$lib/check";
 
   let check = $state<Check | null>(null);
   let error = $state<string | null>(null);

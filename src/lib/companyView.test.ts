@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { applyView, queueSections, searchCompanies, type ViewOptions, type DomainInfo } from "./companyView";
-import type { Company } from "./vault";
+import type { Company } from "./company";
 
 const mk = (over: Partial<Company>): Company => ({
   slug: "x",

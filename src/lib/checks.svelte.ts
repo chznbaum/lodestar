@@ -1,4 +1,4 @@
-import { listChecks, type CheckSummary } from "$lib/checks";
+import { listChecks, type CheckSummary } from "$lib/check";
 
 let checks = $state<CheckSummary[]>([]);
 let loadedPath = $state<string | null>(null);

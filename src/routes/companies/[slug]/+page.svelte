@@ -3,7 +3,7 @@
   import { page } from "$app/state";
   import { companiesStore as cs } from "$lib/companies.svelte";
   import { domainsStore as ds } from "$lib/domains.svelte";
-  import { COMPANY_STATUSES } from "$lib/vault";
+  import { COMPANY_STATUSES } from "$lib/company";
   import { humanize, humanizeList } from "$lib/labels";
   import { renderNotes } from "$lib/markdown";
   import Combobox from "$lib/Combobox.svelte";

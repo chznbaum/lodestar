@@ -5,7 +5,8 @@
   import { domainsStore as ds } from "$lib/domains.svelte";
   import { applyView, distinct, queueSections, type SortKey, type RankedMatch } from "$lib/companyView";
   import { segments } from "$lib/highlight";
-  import type { Company, Domain } from "$lib/vault";
+  import type { Company } from "$lib/company";
+  import type { Domain } from "$lib/domain";
   import { todayIso } from "$lib/vault";
   import { humanize, monogram, relativeDate } from "$lib/labels";
   import CreateCompanyForm from "$lib/CreateCompanyForm.svelte";

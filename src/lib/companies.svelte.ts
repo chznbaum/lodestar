@@ -1,14 +1,13 @@
 import {
   listCompanies,
-  pickVault,
   updateCompanyField,
   setCompanyNotes,
   setCompanyStatus,
   createCompany,
-  todayIso,
   type Company,
   type NewCompany,
-} from "$lib/vault";
+} from "$lib/company";
+import { pickVault, todayIso } from "$lib/vault";
 
 let vaultPath = $state<string | null>(
   typeof localStorage !== "undefined" ? localStorage.getItem("vaultPath") : null,
