@@ -1,5 +1,6 @@
 mod check;
 mod company;
+mod config;
 mod domain;
 mod job;
 mod note;
@@ -21,7 +22,9 @@ pub fn run() {
             check::list_checks,
             check::get_check,
             secrets::set_secret,
-            secrets::secret_present
+            secrets::secret_present,
+            config::get_config,
+            config::set_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
