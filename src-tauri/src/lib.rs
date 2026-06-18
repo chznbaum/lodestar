@@ -4,6 +4,8 @@ mod config;
 mod domain;
 mod job;
 mod note;
+mod pipeline;
+mod profile;
 mod sanitize;
 mod scraper;
 mod secrets;
