@@ -98,24 +98,33 @@
       ScrapingBee <b>{spend.credits}</b> credits · OpenRouter <b>${(spend.usdMicro / 1e6).toFixed(2)}</b>
       <span class="sub">across {checksStore.checks.length} run{checksStore.checks.length === 1 ? "" : "s"}</span>
     </p>
-    <div class="checks__head">
-      <span>Started</span><span>Kind</span><span>Trigger</span>
-      <span>Companies</span><span>Roles</span><span>Steps</span><span>Status</span>
-    </div>
-    <ul class="checks__list">
-      {#each checksStore.checks as c (c.slug)}
-        <li>
-          <button class="checks__row" onclick={() => open(c.slug)}>
-            <span class="checks__mono">{c.started_at ?? c.slug}</span>
-            <span>{c.kind}</span>
-            <span>{c.trigger}</span>
-            <span>{c.company_count}</span>
-            <span>{c.roles_found}</span>
-            <span>{c.step_count}{c.failed_count > 0 ? ` (${c.failed_count} failed)` : ""}</span>
-            <span class="checks__status checks__status--{c.status}">{c.status}</span>
-          </button>
-        </li>
-      {/each}
-    </ul>
+    <table class="checks-table">
+      <thead>
+        <tr>
+          <th>Started</th>
+          <th>Kind</th>
+          <th>Trigger</th>
+          <th>Companies</th>
+          <th>Roles</th>
+          <th>Steps</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each checksStore.checks as c (c.slug)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- The anchor in the first cell is the sole keyboard/AT affordance; the row click is mouse-only convenience. -->
+          <tr class="checks__row" onclick={() => open(c.slug)}>
+            <td><a class="checks__row-link" href="/checks/{c.slug}"><span class="checks__mono">{c.started_at ?? c.slug}</span></a></td>
+            <td>{c.kind}</td>
+            <td>{c.trigger}</td>
+            <td>{c.company_count}</td>
+            <td>{c.roles_found}</td>
+            <td>{c.step_count}{c.failed_count > 0 ? ` (${c.failed_count} failed)` : ""}</td>
+            <td><span class="checks__status checks__status--{c.status}">{c.status}</span></td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
   {/if}
 </section>

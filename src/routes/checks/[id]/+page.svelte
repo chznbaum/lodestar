@@ -43,22 +43,31 @@
     </p>
     <p class="check-detail__meta">Cost: ScrapingBee <b>{spend.credits}</b> credits · OpenRouter <b>${(spend.usdMicro / 1e6).toFixed(2)}</b></p>
 
-    <div class="steps__head">
-      <span>Stage</span><span>Class</span><span>Target</span>
-      <span>Status</span><span>Tries</span><span>Cost</span><span>Error</span>
-    </div>
-    <ul class="steps__list">
-      {#each check.steps as s, i (i)}
-        <li class="steps__row steps__row--{s.status}">
-          <span>{s.stage}</span>
-          <span>{s.class}</span>
-          <span>{s.target}</span>
-          <span>{s.status}</span>
-          <span>{s.attempts}</span>
-          <span>{fmtCost(s)}</span>
-          <span>{s.error ?? ""}</span>
-        </li>
-      {/each}
-    </ul>
+    <table class="steps-table">
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Class</th>
+          <th>Target</th>
+          <th>Status</th>
+          <th>Tries</th>
+          <th>Cost</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each check.steps as s, i (i)}
+          <tr class={s.status === "failed" ? "steps-row--failed" : ""}>
+            <td>{s.stage}</td>
+            <td>{s.class}</td>
+            <td>{s.target}</td>
+            <td>{s.status}</td>
+            <td>{s.attempts}</td>
+            <td>{fmtCost(s)}</td>
+            <td>{s.error ?? ""}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
   </section>
 {/if}

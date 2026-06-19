@@ -1,7 +1,7 @@
 /* Checks surface (layout block): the job-queue inspector — a run table (/checks)
  * and a per-run step inspector (/checks/[id]). Minimal Phase-F styling for
  * legibility; richer treatment can ride with Phase A when real runs exist.
- * Grid tables mirror the .companies__thead/.companies__row pattern. */
+ * Uses semantic <table> elements (not CSS grid). */
 
 .checks,
 .check-detail {
@@ -14,33 +14,36 @@
 }
 
 /* ── Run table (/checks) ──────────────────────────────── */
-.checks__head,
-.checks__row {
-  display: grid;
-  grid-template-columns: 13rem 7rem 6rem 6rem 4rem 1fr 8rem;
-  gap: var(--sp-4);
-  align-items: center;
-  padding: var(--sp-row-y) 0.2rem;
+.checks-table {
+  width: 100%;
+  border-collapse: collapse;
 }
-.checks__head {
-  border-bottom: 2px solid var(--line);
+.checks-table th {
+  text-align: left;
+  font-family: var(--font-sans);
   font-size: var(--fs-xs);
-  color: var(--faint);
+  color: var(--ink-soft);
+  padding: var(--sp-row-y) 0.2rem;
+  border-bottom: 2px solid var(--line);
 }
-.checks__list li {
+.checks-table td {
+  padding: var(--sp-row-y) 0.2rem;
   border-bottom: 1px solid var(--line);
 }
 .checks__row {
-  width: 100%;
-  border: none;
-  background: none;
-  font: inherit;
-  text-align: left;
   cursor: pointer;
   color: var(--ink);
 }
 .checks__row:hover {
   background: var(--card-hover);
+}
+.checks__row-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+.checks__row-link:hover {
+  text-decoration: underline;
 }
 .checks__mono {
   font-size: var(--fs-sm);
@@ -49,7 +52,6 @@
 
 /* status pill — semantic state colors from tokens */
 .checks__status {
-  justify-self: start;
   padding: 0.1rem 0.5rem;
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -82,25 +84,25 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
-.steps__head,
-.steps__row {
-  display: grid;
-  grid-template-columns: 12rem 6rem 9rem 6rem 4rem 5rem 1fr;
-  gap: var(--sp-4);
-  align-items: center;
-  padding: var(--sp-row-y) 0.2rem;
+.steps-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: var(--fs-sm);
 }
-.steps__head {
-  border-bottom: 2px solid var(--line);
+.steps-table th {
+  text-align: left;
+  font-family: var(--font-sans);
   font-size: var(--fs-xs);
-  color: var(--faint);
+  color: var(--ink-soft);
+  padding: var(--sp-row-y) 0.2rem;
+  border-bottom: 2px solid var(--line);
 }
-.steps__list li {
+.steps-table td {
+  padding: var(--sp-row-y) 0.2rem;
   border-bottom: 1px solid var(--line);
   color: var(--ink);
 }
-.steps__row--failed {
+.steps-row--failed {
   background: var(--danger-soft);
 }
 
