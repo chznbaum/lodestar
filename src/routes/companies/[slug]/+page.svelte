@@ -8,6 +8,8 @@
   import { renderNotes } from "$lib/markdown";
   import Combobox from "$lib/Combobox.svelte";
   import DomainPicker from "$lib/DomainPicker.svelte";
+  import { listJobs, type Job } from "$lib/job";
+  import { fetchJobsForCompany, cancelRun, onRunStep, onRunFinished } from "$lib/pipeline";
 
   const slug = $derived(page.params.slug ?? "");
   const company = $derived(cs.bySlug(slug));
@@ -102,6 +104,61 @@
     await cs.softRemove(company.slug);
     goto("/");
   }
+
+  // ── Discovery: fetch + the selection gate ─────────────
+  let jobs = $state<Job[]>([]);
+  let selectedSlugs = $state<string[]>([]);
+  let runId = $state<string | null>(null);
+  let running = $state(false);
+  let progress = $state("");
+
+  async function loadJobs() {
+    if (!cs.vaultPath) return;
+    const all = await listJobs(cs.vaultPath);
+    jobs = all.filter((j) => j.company === slug);
+  }
+  $effect(() => {
+    if (cs.vaultPath && slug) loadJobs();
+  });
+
+  // Live progress: per-step + run-finished events for the run we started.
+  $effect(() => {
+    const subs: (() => void)[] = [];
+    let active = true;
+    Promise.all([
+      onRunStep((e) => {
+        if (e.run_id === runId) progress = `${e.stage}: ${e.status}`;
+      }),
+      onRunFinished((e) => {
+        if (e.run_id !== runId) return;
+        running = false;
+        progress = e.status;
+        loadJobs();
+      }),
+    ]).then((u) => {
+      if (active) subs.push(...u);
+      else u.forEach((f) => f());
+    });
+    return () => {
+      active = false;
+      subs.forEach((f) => f());
+    };
+  });
+
+  async function fetchJobs() {
+    if (!cs.vaultPath || running) return;
+    running = true;
+    progress = "starting…";
+    try {
+      runId = await fetchJobsForCompany(cs.vaultPath, slug);
+    } catch (e) {
+      progress = `error: ${e}`;
+      running = false;
+    }
+  }
+  async function cancelFetch() {
+    if (runId) await cancelRun(runId);
+  }
 </script>
 
 <div class="workspace">
@@ -144,7 +201,17 @@
       />
       <span class="sub">last checked: {c.last_checked ?? "never checked"}</span>
       <button class="linkbtn" onclick={() => cs.markChecked(c.slug)}>mark checked</button>
-      <button class="btn sm" disabled title="Fetch arrives in a later phase">Fetch jobs</button>
+      {#if running}
+        <span class="sub">⟳ {progress}</span>
+        <button class="btn sm" onclick={cancelFetch}>Cancel</button>
+      {:else}
+        <button
+          class="btn sm"
+          onclick={fetchJobs}
+          disabled={!cs.vaultPath || !c.careers_url}
+          title={c.careers_url ? "Scrape this company's careers page for roles" : "No careers URL set — add one in Details"}
+        >Fetch jobs</button>
+      {/if}
     </div>
 
     <div class="tabs">
@@ -155,11 +222,11 @@
 
     {#if wtab === "overview"}
       <section class="panel">
-        <div class="panel__head">Roles found</div>
-        {#if !c.last_checked}
-          <p class="empty">Not fetched yet — "Fetch jobs" will list matching roles here.</p>
+        <div class="panel__head">Roles found <span class="sub">{jobs.length}</span></div>
+        {#if jobs.length === 0}
+          <p class="empty">{c.last_checked ? "No roles found." : "Not fetched yet — \"Fetch jobs\" lists matching roles here."}</p>
         {:else}
-          <p class="empty">No active roles found as of {c.last_checked}.</p>
+          <p class="empty">{jobs.length} role{jobs.length === 1 ? "" : "s"} — open the <button class="linkbtn" onclick={() => (wtab = "roles")}>Roles</button> tab to select which to deep-fetch.</p>
         {/if}
       </section>
 
@@ -243,11 +310,29 @@
 
     {#if wtab === "roles"}
       <section class="panel">
-        <div class="panel__head">Roles found</div>
-        {#if !c.last_checked}
-          <p class="empty">Not fetched yet — "Fetch jobs" will list matching roles here.</p>
+        <div class="panel__head">
+          <span>Roles found <span class="sub">{jobs.length}</span></span>
+          {#if jobs.length}
+            <span class="roles__actions">
+              <button class="linkbtn" onclick={() => (selectedSlugs = jobs.map((j) => j.slug))}>select all</button>
+              <button class="linkbtn" onclick={() => (selectedSlugs = [])}>clear</button>
+              <button class="btn sm" disabled title="JD fetch arrives in Phase B">Fetch selected ({selectedSlugs.length})</button>
+            </span>
+          {/if}
+        </div>
+        {#if jobs.length === 0}
+          <p class="empty">{c.last_checked ? "No roles found." : "Not fetched yet — \"Fetch jobs\" lists matching roles here."}</p>
         {:else}
-          <p class="empty">No active roles found as of {c.last_checked}.</p>
+          <ul class="roles">
+            {#each jobs as j (j.slug)}
+              <li class="roles__row">
+                <input type="checkbox" bind:group={selectedSlugs} value={j.slug} />
+                <span class="roles__title">{j.title}</span>
+                <span class="roles__meta">{[humanize(j.classification ?? ""), j.location].filter(Boolean).join(" · ")}</span>
+                <span class="chip flat">{j.jd_fetched ? "fetched" : "new"}</span>
+              </li>
+            {/each}
+          </ul>
         {/if}
       </section>
     {/if}

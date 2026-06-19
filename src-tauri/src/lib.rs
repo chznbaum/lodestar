@@ -11,12 +11,26 @@ mod prompts;
 mod sanitize;
 mod scraper;
 mod secrets;
+mod worker;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            // The durable pipeline queue lives in the app data dir (never the vault).
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let queue = pipeline::queue::SqliteQueue::open(&dir.join("queue.db"))?;
+            app.manage(worker::PipelineState {
+                queue: std::sync::Arc::new(queue),
+                cancelled: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             company::list_companies,
             company::update_company_field,
@@ -30,7 +44,9 @@ pub fn run() {
             secrets::set_secret,
             secrets::secret_present,
             config::get_config,
-            config::set_config
+            config::set_config,
+            worker::fetch_jobs_for_company,
+            worker::cancel_run
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

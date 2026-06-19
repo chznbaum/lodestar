@@ -1,10 +1,18 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { companiesStore as cs } from "$lib/companies.svelte";
-  import { getCheck, type Check } from "$lib/check";
+  import { getCheck, type Check, type Step } from "$lib/check";
+  import { runSpend } from "$lib/spend";
 
   let check = $state<Check | null>(null);
   let error = $state<string | null>(null);
+  const spend = $derived(check ? runSpend(check.steps) : { credits: 0, usdMicro: 0 });
+
+  // Per-step cost, formatted by class: scrape → credits, llm → dollars (sub-cent precision).
+  function fmtCost(s: Step): string {
+    if (s.cost == null) return "";
+    return s.class === "scrape" ? `${s.cost} cr` : `$${(s.cost / 1e6).toFixed(4)}`;
+  }
 
   $effect(() => {
     const id = page.params.id;
@@ -33,6 +41,7 @@
       {check.companies.join(", ")} ·
       {check.roles_found} roles · {check.jds_fetched} JDs · {check.errors} errors
     </p>
+    <p class="check-detail__meta">Cost: ScrapingBee <b>{spend.credits}</b> credits · OpenRouter <b>${(spend.usdMicro / 1e6).toFixed(2)}</b></p>
 
     <div class="steps__head">
       <span>Stage</span><span>Class</span><span>Target</span>
@@ -46,7 +55,7 @@
           <span>{s.target}</span>
           <span>{s.status}</span>
           <span>{s.attempts}</span>
-          <span>{s.cost ?? ""}</span>
+          <span>{fmtCost(s)}</span>
           <span>{s.error ?? ""}</span>
         </li>
       {/each}

@@ -13,9 +13,10 @@ pub struct LlmRequest {
 
 pub struct LlmResponse {
     pub content: String,
-    /// Actual cost in USD from OpenRouter; `None` if the response didn't report it — never
-    /// fabricated.
-    pub cost_usd: Option<f64>,
+    /// Actual cost from OpenRouter in **micro-dollars** (1_000_000 = $1.00), converted from
+    /// `usage.cost` at the parse boundary. Integer so downstream sums stay exact; `None` if the
+    /// response didn't report a cost — never fabricated.
+    pub cost_micro_usd: Option<i64>,
 }
 
 pub trait Llm {
@@ -61,7 +62,13 @@ impl Llm for OpenRouterLlm {
                 {"role": "user", "content": req.user},
             ],
         });
-        let resp = reqwest::blocking::Client::new()
+        // LLM generation over a full careers page routinely exceeds the blocking client's 30s
+        // DEFAULT timeout (that was the "Decode: TimedOut" failure); give it ample time.
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .map_err(|e| format!("openrouter client build failed: {e}"))?;
+        let resp = client
             .post(OPENROUTER_ENDPOINT)
             .bearer_auth(&key)
             .json(&body)
@@ -70,7 +77,7 @@ impl Llm for OpenRouterLlm {
         let status = resp.status();
         let text = resp
             .text()
-            .map_err(|e| format!("openrouter body read failed: {e}"))?;
+            .map_err(|e| format!("openrouter body read failed (HTTP {status}): {e:?}"))?;
         if !status.is_success() {
             return Err(format!("openrouter returned {status}: {text}"));
         }
@@ -82,9 +89,13 @@ impl Llm for OpenRouterLlm {
             .next()
             .and_then(|c| c.message.content)
             .ok_or("openrouter: no message content in response")?;
-        // Actual cost from usage.cost; None if absent — recorded honestly, not fabricated.
-        let cost_usd = parsed.usage.and_then(|u| u.cost);
-        Ok(LlmResponse { content, cost_usd })
+        // Convert usage.cost (USD float) → micro-dollars once, here at the JSON boundary; None
+        // if absent — recorded honestly, not fabricated.
+        let cost_micro_usd = parsed
+            .usage
+            .and_then(|u| u.cost)
+            .map(|c| (c * 1_000_000.0).round() as i64);
+        Ok(LlmResponse { content, cost_micro_usd })
     }
 }
 
@@ -95,21 +106,21 @@ pub mod tests {
     /// Test-only LLM. Reachable cross-module as `crate::llm::tests::FakeLlm`.
     pub struct FakeLlm {
         pub reply: String,
-        pub cost_usd: f64,
+        pub cost_micro_usd: i64,
     }
     impl Llm for FakeLlm {
         fn complete(&self, _req: &LlmRequest) -> Result<LlmResponse, String> {
-            Ok(LlmResponse { content: self.reply.clone(), cost_usd: Some(self.cost_usd) })
+            Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(self.cost_micro_usd) })
         }
     }
 
     #[test]
     fn fake_echoes_reply_and_cost() {
-        let l = FakeLlm { reply: "[]".into(), cost_usd: 0.01 };
+        let l = FakeLlm { reply: "[]".into(), cost_micro_usd: 10_000 }; // $0.01
         let r = l
             .complete(&LlmRequest { model: "m".into(), system: "s".into(), user: "u".into() })
             .unwrap();
         assert_eq!(r.content, "[]");
-        assert_eq!(r.cost_usd, Some(0.01));
+        assert_eq!(r.cost_micro_usd, Some(10_000));
     }
 }

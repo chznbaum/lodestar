@@ -153,3 +153,33 @@
   color: var(--faint);
   white-space: nowrap;
 }
+
+/* ── Roles gate (discovery selection) ── */
+.roles__actions {
+  display: inline-flex;
+  gap: var(--sp-3);
+  align-items: center;
+}
+.roles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.roles__row {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-row-y) 0.2rem;
+  border-bottom: 1px solid var(--line);
+}
+.roles__title {
+  font-weight: 500;
+}
+.roles__meta {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-right: auto;
+}
+.roles__link {
+  font-size: var(--fs-sm);
+}

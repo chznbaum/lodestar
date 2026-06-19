@@ -103,3 +103,37 @@
 .steps__row--failed {
   background: var(--danger-soft);
 }
+
+/* ── API-keys settings + spend readout ── */
+.checks__settings {
+  margin-bottom: var(--sp-5);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.keyfield {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+.keyfield label {
+  width: 11rem;
+  font-size: var(--fs-sm);
+}
+.keyfield input[type="password"] {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--wire);
+  font: inherit;
+}
+.keyfield__status {
+  width: 6rem;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.checks__spend {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+}

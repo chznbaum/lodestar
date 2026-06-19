@@ -35,13 +35,27 @@ pub struct ScrapingBeeScraper;
 impl Scraper for ScrapingBeeScraper {
     fn fetch(&self, url: &str) -> Result<ScrapeResult, String> {
         let key = crate::secrets::get_secret("scrapingbee_api_key")?;
-        let resp = reqwest::blocking::Client::new()
+        // ScrapingBee with JS render + networkidle + the wait can take 20–30s+; the blocking
+        // client's 30s DEFAULT timeout is too tight (the careers scrape already hit ~25s), so
+        // set a generous explicit one.
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(90))
+            .build()
+            .map_err(|e| format!("scrapingbee client build failed: {e}"))?;
+        let resp = client
             .get(SCRAPINGBEE_ENDPOINT)
             .bearer_auth(&key)
             .query(&[
                 ("url", url),
                 ("render_js", "true"),
                 ("premium_proxy", "true"),
+                // ATS careers pages (Ashby/Greenhouse/Lever/…) are client-rendered SPAs that
+                // fetch their listings via an async XHR *after* the initial render. Wait for the
+                // network to settle so those listings are in the captured HTML, plus a small
+                // buffer for the post-fetch DOM render. Without this, render_js returns the empty
+                // shell and structure-listings finds nothing.
+                ("wait_browser", "networkidle2"),
+                ("wait", "5000"),
             ])
             .send()
             .map_err(|e| format!("scrapingbee request failed: {e}"))?;

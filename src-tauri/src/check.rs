@@ -23,7 +23,7 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<f64>,
+    pub cost: Option<i64>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -170,6 +170,9 @@ pub struct CheckSummary {
     pub roles_found: u32,
     pub step_count: usize,
     pub failed_count: usize,
+    /// Cost tally, unit implied by step `class`: ScrapingBee credits + OpenRouter micro-dollars.
+    pub credits: u32,
+    pub usd_micro: i64,
 }
 
 impl CheckSummary {
@@ -186,6 +189,18 @@ impl CheckSummary {
             roles_found: c.roles_found,
             step_count: c.steps.len(),
             failed_count: c.steps.iter().filter(|s| s.status == "failed").count(),
+            credits: c
+                .steps
+                .iter()
+                .filter(|s| s.class == "scrape")
+                .filter_map(|s| s.cost)
+                .sum::<i64>() as u32,
+            usd_micro: c
+                .steps
+                .iter()
+                .filter(|s| s.class == "llm" || s.class == "llm+web")
+                .filter_map(|s| s.cost)
+                .sum::<i64>(),
         }
     }
 }
@@ -207,7 +222,7 @@ pub fn list_checks(vault_path: String) -> Result<Vec<CheckSummary>, String> {
 mod tests {
     use super::*;
 
-    const RUN: &str = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: awaiting_input\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\njds_fetched: 0\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5.0\n  - stage: structure-listings\n    class: llm\n    target: stripe\n    status: ok\n    attempts: 1\n---\n\n## Summary\n\nstripe: 2 roles\n";
+    const RUN: &str = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: awaiting_input\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\njds_fetched: 0\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n  - stage: structure-listings\n    class: llm\n    target: stripe\n    status: ok\n    attempts: 1\n---\n\n## Summary\n\nstripe: 2 roles\n";
 
     #[test]
     fn parses_run_with_steps() {
@@ -219,7 +234,7 @@ mod tests {
         assert_eq!(c.roles_found, 2);
         assert_eq!(c.steps.len(), 2);
         assert_eq!(c.steps[0].stage, "careers-scrape");
-        assert_eq!(c.steps[0].cost, Some(5.0));
+        assert_eq!(c.steps[0].cost, Some(5));
         assert_eq!(c.steps[1].class, "llm");
     }
 
@@ -243,7 +258,7 @@ mod tests {
         assert_eq!(again.status, "awaiting_input");
         assert_eq!(again.steps.len(), 2);
         assert_eq!(again.steps[0].stage, "careers-scrape");
-        assert_eq!(again.steps[0].cost, Some(5.0));
+        assert_eq!(again.steps[0].cost, Some(5));
         assert_eq!(again.roles_found, 2);
     }
 
@@ -280,7 +295,7 @@ mod tests {
             started_at: None,
             finished_at: None,
             error: None,
-            cost: Some(5.0),
+            cost: Some(5),
         };
         let updated = append_step(&vault, "2026-06-17-0001", step).unwrap();
         assert_eq!(updated.steps.len(), 1);
@@ -290,6 +305,19 @@ mod tests {
         assert_eq!(reread.steps[0].stage, "careers-scrape");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn summary_tallies_credits_and_usd_by_class() {
+        let mut c = empty_run("2026-06-18-0001");
+        c.steps = vec![
+            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(25) },
+            Step { stage: "structure-listings".into(), class: "llm".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(500_000) }, // $0.50 in micro-dollars
+            Step { stage: "pre-filter".into(), class: "script".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None },
+        ];
+        let s = CheckSummary::from(&c);
+        assert_eq!(s.credits, 25); // scrape steps only
+        assert_eq!(s.usd_micro, 500_000); // llm steps only ($0.50)
     }
 
     #[test]

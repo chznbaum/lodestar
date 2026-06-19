@@ -28,7 +28,7 @@ pub(crate) fn record_step(
     started_at: String,
     status: &str,
     error: Option<String>,
-    cost: Option<f64>,
+    cost: Option<i64>,
 ) -> Result<Step, String> {
     let step = Step {
         stage: stage.to_string(),
@@ -58,7 +58,7 @@ pub fn run_scrape_step<S: Scraper>(
     let started = now_iso();
     match scraper.fetch(url) {
         Ok(result) => {
-            let cost = result.credits.map(|c| c as f64);
+            let cost = result.credits.map(|c| c as i64);
             record_step(vault_path, run_id, "careers-scrape", "scrape", target, started, "ok", None, cost)?;
             Ok(result)
         }
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(reread.steps.len(), 1);
         assert_eq!(reread.steps[0].stage, "careers-scrape");
         assert_eq!(reread.steps[0].status, "ok");
-        assert_eq!(reread.steps[0].cost, Some(5.0)); // credits Some(5) -> cost Some(5.0)
+        assert_eq!(reread.steps[0].cost, Some(5)); // credits Some(5) -> cost Some(5)
         std::fs::remove_dir_all(&dir).ok();
     }
 

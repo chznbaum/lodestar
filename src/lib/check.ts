@@ -29,6 +29,9 @@ export interface CheckSummary {
   roles_found: number;
   step_count: number;
   failed_count: number;
+  credits: number;
+  /** OpenRouter cost in micro-dollars (1_000_000 = $1.00). */
+  usd_micro: number;
 }
 
 /** A full run, including its steps (the run-detail / step inspector). */

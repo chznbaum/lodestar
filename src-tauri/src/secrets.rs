@@ -1,56 +1,68 @@
 //! API keys in the OS keychain — never the vault. Only whitelisted keys are allowed;
 //! the frontend can set a key and ask whether one is present, but never reads it back.
 //! Real value comes from the OS keychain via the `apple-native` keyring backend.
+//!
+//! Each key's value is **cached in memory after its first read**, so the OS keychain is
+//! touched at most once per key per session — otherwise macOS prompts for authorization on
+//! every access (presence checks, each pipeline step, every retry → a flood of prompts).
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 pub const SECRET_KEYS: &[&str] = &["scrapingbee_api_key", "openrouter_api_key"];
 
 /// Keychain service namespace for this app's secrets.
 const SERVICE: &str = "dev.lodestar.lodestar";
 
-/// One cached `Entry` per whitelisted key, reused across calls.
-///
-/// Reuse is correct for the real OS keychain — an `Entry` is only a handle to the
-/// (service, key) record, not a cached copy of the value, so each `get_password`
-/// still reads the live keychain. It is also *required* by the test mock, whose store
-/// lives in the entry itself (`CredentialPersistence::EntryOnly`): a fresh `Entry` per
-/// call would never see a value set on a previous, separate `Entry`.
-fn entries() -> &'static Mutex<HashMap<&'static str, Arc<keyring::Entry>>> {
-    static ENTRIES: OnceLock<Mutex<HashMap<&'static str, Arc<keyring::Entry>>>> = OnceLock::new();
-    ENTRIES.get_or_init(|| Mutex::new(HashMap::new()))
+/// In-memory value cache, populated on first read/write. Keeps keychain access (and its
+/// per-access auth prompt) to once per key per session.
+fn cache() -> &'static Mutex<HashMap<&'static str, String>> {
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// The cached keychain entry for a whitelisted key, or an error for an unknown key.
-fn entry(key: &str) -> Result<Arc<keyring::Entry>, String> {
-    let canonical = SECRET_KEYS
+/// Validate against the whitelist, returning the canonical `&'static str` key.
+fn canonical(key: &str) -> Result<&'static str, String> {
+    SECRET_KEYS
         .iter()
         .copied()
         .find(|&k| k == key)
-        .ok_or_else(|| format!("unknown secret key {key:?}; expected one of {SECRET_KEYS:?}"))?;
-    let mut map = entries().lock().map_err(|e| e.to_string())?;
-    if let Some(e) = map.get(canonical) {
-        return Ok(e.clone());
-    }
-    let e = Arc::new(keyring::Entry::new(SERVICE, canonical).map_err(|e| e.to_string())?);
-    map.insert(canonical, e.clone());
-    Ok(e)
+        .ok_or_else(|| format!("unknown secret key {key:?}; expected one of {SECRET_KEYS:?}"))
+}
+
+fn entry(key: &'static str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(SERVICE, key).map_err(|e| e.to_string())
 }
 
 pub fn set_secret_value(key: &str, value: &str) -> Result<(), String> {
-    entry(key)?.set_password(value).map_err(|e| e.to_string())
+    let k = canonical(key)?;
+    entry(k)?.set_password(value).map_err(|e| e.to_string())?;
+    cache().lock().map_err(|e| e.to_string())?.insert(k, value.to_string());
+    Ok(())
 }
 
-/// Backend-only: read a key's value (used by the scraper/LLM clients in Phase A).
+/// Backend-only: read a key's value (used by the scraper/LLM clients). Cached after first read.
 #[allow(dead_code)]
 pub fn get_secret(key: &str) -> Result<String, String> {
-    entry(key)?.get_password().map_err(|e| e.to_string())
+    let k = canonical(key)?;
+    if let Some(v) = cache().lock().map_err(|e| e.to_string())?.get(k) {
+        return Ok(v.clone());
+    }
+    let v = entry(k)?.get_password().map_err(|e| e.to_string())?;
+    cache().lock().map_err(|e| e.to_string())?.insert(k, v.clone());
+    Ok(v)
 }
 
 pub fn is_present(key: &str) -> Result<bool, String> {
-    match entry(key)?.get_password() {
-        Ok(_) => Ok(true),
+    let k = canonical(key)?;
+    if cache().lock().map_err(|e| e.to_string())?.contains_key(k) {
+        return Ok(true);
+    }
+    match entry(k)?.get_password() {
+        Ok(v) => {
+            cache().lock().map_err(|e| e.to_string())?.insert(k, v);
+            Ok(true)
+        }
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(e.to_string()),
     }
@@ -74,8 +86,6 @@ mod tests {
     static MOCK: Once = Once::new();
     fn use_mock_keychain() {
         // Route all keyring calls to an in-memory mock store (no real keychain / prompts).
-        // `Once` guarantees the mock builder is installed before any entry is created,
-        // even under parallel tests.
         MOCK.call_once(|| {
             keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
         });
@@ -87,7 +97,7 @@ mod tests {
         assert!(!is_present("openrouter_api_key").unwrap());
         set_secret_value("openrouter_api_key", "sk-or-123").unwrap();
         assert!(is_present("openrouter_api_key").unwrap());
-        assert_eq!(get_secret("openrouter_api_key").unwrap(), "sk-or-123");
+        assert_eq!(get_secret("openrouter_api_key").unwrap(), "sk-or-123"); // served from cache
     }
 
     #[test]
