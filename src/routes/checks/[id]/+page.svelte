@@ -39,7 +39,7 @@
     <p class="check-detail__meta">
       {check.kind} · {check.trigger} · {check.status} ·
       {check.companies.join(", ")} ·
-      {check.roles_found} roles · {check.jds_fetched} JDs · {check.errors} errors
+      {check.roles_found} roles · {check.errors} errors
     </p>
     <p class="check-detail__meta">Cost: ScrapingBee <b>{spend.credits}</b> credits · OpenRouter <b>${(spend.usdMicro / 1e6).toFixed(2)}</b></p>
 

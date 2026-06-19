@@ -89,7 +89,6 @@ mod tests {
             duration: None,
             companies: vec!["stripe".into()],
             roles_found: 0,
-            jds_fetched: 0,
             errors: 0,
             steps: vec![],
         };

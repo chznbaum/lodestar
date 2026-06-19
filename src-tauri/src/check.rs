@@ -37,7 +37,6 @@ pub struct Check {
     pub duration: Option<String>,
     pub companies: Vec<String>,
     pub roles_found: u32,
-    pub jds_fetched: u32,
     pub errors: u32,
     pub steps: Vec<Step>,
 }
@@ -54,8 +53,6 @@ struct Front {
     companies: Vec<String>,
     #[serde(default)]
     roles_found: u32,
-    #[serde(default)]
-    jds_fetched: u32,
     #[serde(default)]
     errors: u32,
     #[serde(default)]
@@ -75,7 +72,6 @@ pub fn parse_check(slug: &str, text: &str) -> Result<Check, String> {
         duration: f.duration,
         companies: f.companies,
         roles_found: f.roles_found,
-        jds_fetched: f.jds_fetched,
         errors: f.errors,
         steps: f.steps,
     })
@@ -98,7 +94,6 @@ pub fn render_check_note(check: &Check) -> String {
         duration: Option<&'a str>,
         companies: &'a [String],
         roles_found: u32,
-        jds_fetched: u32,
         errors: u32,
         steps: &'a [Step],
     }
@@ -112,16 +107,14 @@ pub fn render_check_note(check: &Check) -> String {
         duration: check.duration.as_deref(),
         companies: &check.companies,
         roles_found: check.roles_found,
-        jds_fetched: check.jds_fetched,
         errors: check.errors,
         steps: &check.steps,
     };
     let yaml = serde_yaml::to_string(&fm).expect("check frontmatter serializes");
     let summary = format!(
-        "{} companies · {} roles found · {} JDs fetched · {} errors",
+        "{} companies · {} roles found · {} errors",
         check.companies.len(),
         check.roles_found,
-        check.jds_fetched,
         check.errors,
     );
     format!("---\n{yaml}---\n\n## Summary\n\n{summary}\n")
@@ -222,14 +215,14 @@ pub fn list_checks(vault_path: String) -> Result<Vec<CheckSummary>, String> {
 mod tests {
     use super::*;
 
-    const RUN: &str = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: awaiting_input\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\njds_fetched: 0\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n  - stage: structure-listings\n    class: llm\n    target: stripe\n    status: ok\n    attempts: 1\n---\n\n## Summary\n\nstripe: 2 roles\n";
+    const RUN: &str = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: complete\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n  - stage: structure-listings\n    class: llm\n    target: stripe\n    status: ok\n    attempts: 1\n---\n\n## Summary\n\nstripe: 2 roles\n";
 
     #[test]
     fn parses_run_with_steps() {
         let c = parse_check("2026-06-17-0001", RUN).unwrap();
         assert_eq!(c.slug, "2026-06-17-0001");
         assert_eq!(c.kind, "job_check");
-        assert_eq!(c.status, "awaiting_input");
+        assert_eq!(c.status, "complete");
         assert_eq!(c.companies, vec!["stripe".to_string()]);
         assert_eq!(c.roles_found, 2);
         assert_eq!(c.steps.len(), 2);
@@ -255,7 +248,7 @@ mod tests {
         assert!(text.contains("## Summary"));
         let again = parse_check("2026-06-17-0001", &text).unwrap();
         assert_eq!(again.kind, "job_check");
-        assert_eq!(again.status, "awaiting_input");
+        assert_eq!(again.status, "complete");
         assert_eq!(again.steps.len(), 2);
         assert_eq!(again.steps[0].stage, "careers-scrape");
         assert_eq!(again.steps[0].cost, Some(5));
@@ -273,7 +266,6 @@ mod tests {
             duration: None,
             companies: vec!["stripe".into()],
             roles_found: 0,
-            jds_fetched: 0,
             errors: 0,
             steps: vec![],
         }

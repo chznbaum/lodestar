@@ -45,7 +45,6 @@ export interface Check {
   duration: string | null;
   companies: string[];
   roles_found: number;
-  jds_fetched: number;
   errors: number;
   steps: Step[];
 }

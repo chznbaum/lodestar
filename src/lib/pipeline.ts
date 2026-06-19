@@ -23,7 +23,7 @@ export function onRunStep(cb: (e: RunStepEvent) => void): Promise<UnlistenFn> {
   return listen<RunStepEvent>("run:step", (ev) => cb(ev.payload));
 }
 
-/** Subscribe to run completion (`status` = awaiting_input | failed | cancelled). */
+/** Subscribe to run completion (`status` = complete | failed | cancelled). */
 export function onRunFinished(cb: (e: RunStepEvent) => void): Promise<UnlistenFn> {
   return listen<RunStepEvent>("run:finished", (ev) => cb(ev.payload));
 }

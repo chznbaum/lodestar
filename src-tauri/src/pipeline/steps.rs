@@ -1,9 +1,12 @@
-//! The discovery chain as **step-level queue tasks** (the design's "queue tasks ARE the
-//! steps" model). Each task is one retryable unit; on success it enqueues its successor
-//! (carrying its output in the payload), so a retry never re-does upstream successful work —
-//! a `structure-listings` retry re-uses the saved scraped text (no re-scrape), a `finalize`
-//! retry re-uses the saved listings (no re-LLM). This generalizes to Phase B's per-role
-//! JD fetches (N independent tasks; only the failures retry).
+//! The `job_check` discovery chain as **step-level queue tasks** (the design's "queue tasks
+//! ARE the steps" model). Each task is one retryable unit; on success it enqueues its
+//! successor (carrying its output in the payload), so a retry never re-does upstream
+//! successful work — a `structure-listings` retry re-uses the saved scraped text (no
+//! re-scrape), a `finalize` retry re-uses the saved listings (no re-LLM).
+//!
+//! `job_check` is a standalone listing-discovery run. It ends in `complete` once listings
+//! are filtered and written as job stubs. Per-job detail (`job_detail`) is a separate future
+//! check kind — its own run, not a step on this chain.
 //!
 //! Discovery = 3 tasks per company:
 //!   `careers-scrape` (scrape+sanitize) → `structure-listings` (LLM) → `finalize` (filter+write).
@@ -97,7 +100,6 @@ pub fn start_discovery(
         duration: None,
         companies: vec![company_slug.to_string()],
         roles_found: 0,
-        jds_fetched: 0,
         errors: 0,
         steps: vec![],
     };
@@ -145,7 +147,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
             queue.complete(task.id)?;
             sink.step_done(&task.run_id, &task.stage, "ok");
             if task.stage == "finalize" {
-                sink.run_finished(&task.run_id, "awaiting_input");
+                sink.run_finished(&task.run_id, "complete");
             }
         }
         Err(e) => {
@@ -283,7 +285,7 @@ fn dispatch<S: Scraper, L: Llm>(
 
             let mut run = get_check(vault_path.to_string(), run_id.to_string())?;
             run.roles_found = selected.len() as u32;
-            run.status = "awaiting_input".into();
+            run.status = "complete".into();
             run.finished_at = Some(now_iso());
             write_check(vault_path, &run)?;
             Ok(vec![])
@@ -358,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn discovery_drains_to_filtered_stubs_and_awaiting_input() {
+    fn discovery_drains_to_filtered_stubs_and_complete() {
         let (dir, vault) = setup_vault();
         let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
         let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
@@ -368,7 +370,7 @@ mod tests {
         drain(&q, &vault, &scraper, &llm);
 
         let run = get_check(vault, run_id).unwrap();
-        assert_eq!(run.status, "awaiting_input");
+        assert_eq!(run.status, "complete");
         assert_eq!(run.roles_found, 1); // agent filtered out
         assert!(run.steps.iter().any(|s| s.stage == "careers-scrape" && s.cost == Some(5)));
         assert!(run.steps.iter().any(|s| s.stage == "structure-listings" && s.cost == Some(20_000)));
@@ -391,7 +393,7 @@ mod tests {
         assert_eq!(scraper.calls.get(), 1, "scrape must NOT be redone when structure retries");
         assert_eq!(llm.calls.get(), 2, "structure retried after its first failure");
         let run = get_check(vault, run_id).unwrap();
-        assert_eq!(run.status, "awaiting_input"); // recovered to completion
+        assert_eq!(run.status, "complete"); // recovered to completion
         assert_eq!(run.roles_found, 1);
         std::fs::remove_dir_all(&dir).ok();
     }
