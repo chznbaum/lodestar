@@ -6,7 +6,7 @@ export interface Job {
   title: string;
   company: string | null;
   url: string | null;
-  classification: string | null;
+  level: string | null;
   location: string | null;
   comp_low: number | null;
   comp_high: number | null;

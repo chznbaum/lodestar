@@ -411,12 +411,14 @@ fn dispatch_non_scrape<L: Llm>(
             record_step(vault_path, run_id, "pre-filter", "script", company, started, "ok", None, None)?;
 
             for listing in &selected {
+                let validated_level = listing.level.as_deref()
+                    .and_then(|v| if crate::job::VALID_LEVELS.contains(&v) { Some(v.to_string()) } else { None });
                 let job = Job {
                     slug: job_slug(&listing.title, company),
                     title: listing.title.clone(),
                     company: Some(company.to_string()),
                     url: listing.url.clone(),
-                    classification: listing.classification.clone(),
+                    level: validated_level,
                     location: listing.location.clone(),
                     comp_low: None,
                     comp_high: None,
@@ -476,7 +478,7 @@ mod tests {
     }
 
     fn two_listings() -> String {
-        r#"[{"title":"Senior Engineer","url":"https://co/1","location":"Remote","classification":"senior-ic"},
+        r#"[{"title":"Senior Engineer","url":"https://co/1","location":"Remote","level":"senior"},
             {"title":"Real Estate Agent","url":"https://co/2","location":"Remote"}]"#
             .into()
     }
@@ -691,6 +693,42 @@ mod tests {
         assert_eq!(scraper.calls.get(), 2, "FixEncoding must re-issue once");
         let run = get_check(vault, run_id).unwrap();
         assert_eq!(run.status, "failed", "run must fail if encoding fix didn't help");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn finalize_validates_level_drops_unknown_keeps_valid() {
+        // level:"senior" → Some("senior"); level:"wizard" → None (invalid value dropped).
+        let (dir, vault) = setup_vault();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
+        // Two listings: one with a valid level, one with an invalid level
+        let reply = r#"[{"title":"Senior Engineer","url":"https://co/1","level":"senior"},
+                        {"title":"Wizard","url":"https://co/2","level":"wizard"}]"#.to_string();
+        // Both pass the title filter (target_criteria has "engineer" so only "Senior Engineer" makes it).
+        // We need a title that passes the filter for the wizard one too — use a separate profile.
+        // Actually, to test level validation specifically, use a profile that matches both.
+        std::fs::write(
+            dir.join("profile/target_criteria.md"),
+            "---\ntype: target_criteria\nlocation_requirement: remote_only\nmatch_titles:\n  - engineer\n  - wizard\n---\n",
+        ).unwrap();
+        let llm = AlwaysOkLlm { reply };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-18").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        let run = get_check(vault.clone(), run_id).unwrap();
+        assert_eq!(run.status, "complete");
+        // Both stubs should be written
+        let senior_path = dir.join("jobs/senior-engineer-acme.md");
+        let wizard_path = dir.join("jobs/wizard-acme.md");
+        assert!(senior_path.exists(), "senior engineer stub should be written");
+        assert!(wizard_path.exists(), "wizard stub should be written");
+        // Parse and check level values
+        let senior_text = std::fs::read_to_string(&senior_path).unwrap();
+        let wizard_text = std::fs::read_to_string(&wizard_path).unwrap();
+        assert!(senior_text.contains("level: senior"), "valid level 'senior' must be written");
+        assert!(!wizard_text.contains("level:"), "invalid level 'wizard' must be dropped (None)");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

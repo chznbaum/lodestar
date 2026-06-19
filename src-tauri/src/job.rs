@@ -9,6 +9,14 @@ use std::path::Path;
 #[allow(dead_code)]
 pub const JOB_STATUSES: &[&str] = &["new", "reviewed", "pursuing", "skipped"];
 
+/// Valid machine values for the `level` field. Must stay in sync with the LLM prompt
+/// (`prompts.rs`) and the front-end `LEVEL_LABELS` map (`src/lib/level.ts`).
+pub const VALID_LEVELS: &[&str] = &[
+    "junior", "mid", "senior",
+    "front-line-mgmt", "middle-mgmt", "dept-head",
+    "vp", "c-suite",
+];
+
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Job {
     pub slug: String,
@@ -16,7 +24,7 @@ pub struct Job {
     /// Bare company slug, unwrapped from the `company: "[[slug]]"` link.
     pub company: Option<String>,
     pub url: Option<String>,
-    pub classification: Option<String>,
+    pub level: Option<String>,
     pub location: Option<String>,
     pub comp_low: Option<i64>,
     pub comp_high: Option<i64>,
@@ -40,7 +48,7 @@ struct Front {
     title: Option<String>,
     company: Option<String>,
     url: Option<String>,
-    classification: Option<String>,
+    level: Option<String>,
     location: Option<String>,
     comp_low: Option<i64>,
     comp_high: Option<i64>,
@@ -84,7 +92,7 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
         title: f.title.unwrap_or_else(|| slug.to_string()),
         company: f.company.as_deref().map(strip_wikilink),
         url: f.url,
-        classification: f.classification,
+        level: f.level,
         location: f.location,
         comp_low: f.comp_low,
         comp_high: f.comp_high,
@@ -125,7 +133,7 @@ pub fn render_job_note(job: &Job) -> String {
         #[serde(skip_serializing_if = "Option::is_none")]
         url: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        classification: Option<&'a str>,
+        level: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         location: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -157,7 +165,7 @@ pub fn render_job_note(job: &Job) -> String {
         title: &job.title,
         company: job.company.as_ref().map(|c| format!("[[{c}]]")),
         url: job.url.as_deref(),
-        classification: job.classification.as_deref(),
+        level: job.level.as_deref(),
         location: job.location.as_deref(),
         comp_low: job.comp_low,
         comp_high: job.comp_high,
@@ -197,9 +205,9 @@ pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const STUB: &str = "---\nid: senior-engineer-stripe\ntitle: \"Senior Engineer\"\ncompany: \"[[stripe]]\"\nurl: https://stripe.com/jobs/123\nclassification: senior-ic\nlocation: Remote (US)\nats: greenhouse\nstatus: new\nlast_seen: 2026-06-17\n---\n\n";
+    const STUB: &str = "---\nid: senior-engineer-stripe\ntitle: \"Senior Engineer\"\ncompany: \"[[stripe]]\"\nurl: https://stripe.com/jobs/123\nlevel: senior\nlocation: Remote (US)\nats: greenhouse\nstatus: new\nlast_seen: 2026-06-17\n---\n\n";
 
-    const FETCHED: &str = "---\nid: head-of-eng-acme\ntitle: \"Head of Engineering\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/9\nclassification: head-of-eng\ncomp_low: 200000\ncomp_high: 260000\ncomp_currency: USD\ntech_stack: [\"rust\", \"typescript\"]\nfit_score: 8\nstatus: reviewed\njd_raw_file: _jd/head-of-eng-acme.md\n---\n\n## JD — structured\n\nstuff\n";
+    const FETCHED: &str = "---\nid: head-of-eng-acme\ntitle: \"Head of Engineering\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/9\nlevel: dept-head\ncomp_low: 200000\ncomp_high: 260000\ncomp_currency: USD\ntech_stack: [\"rust\", \"typescript\"]\nfit_score: 8\nstatus: reviewed\njd_raw_file: _jd/head-of-eng-acme.md\n---\n\n## JD — structured\n\nstuff\n";
 
     #[test]
     fn parses_stub_and_jd_not_fetched() {
@@ -207,7 +215,7 @@ mod tests {
         assert_eq!(j.slug, "senior-engineer-stripe");
         assert_eq!(j.title, "Senior Engineer");
         assert_eq!(j.company.as_deref(), Some("stripe")); // wikilink stripped
-        assert_eq!(j.classification.as_deref(), Some("senior-ic"));
+        assert_eq!(j.level.as_deref(), Some("senior"));
         assert_eq!(j.status.as_deref(), Some("new"));
         assert_eq!(j.last_seen.as_deref(), Some("2026-06-17"));
         assert!(!j.jd_fetched); // no jd_raw_file and no "## JD — structured"

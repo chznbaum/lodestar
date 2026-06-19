@@ -9,6 +9,7 @@
   import Combobox from "$lib/Combobox.svelte";
   import DomainPicker from "$lib/DomainPicker.svelte";
   import { listJobs, type Job } from "$lib/job";
+  import { levelLabel } from "$lib/level";
   import { fetchJobsForCompany, cancelRun, onRunStep, onRunFinished } from "$lib/pipeline";
   import { onRecordChanged } from "$lib/vaultSync";
 
@@ -344,7 +345,7 @@
               <li class="roles__row">
                 <input type="checkbox" bind:group={selectedSlugs} value={j.slug} />
                 <span class="roles__title">{j.title}</span>
-                <span class="roles__meta">{[humanize(j.classification ?? ""), j.location].filter(Boolean).join(" · ")}</span>
+                <span class="roles__meta">{[levelLabel(j.level), j.location].filter(Boolean).join(" · ")}</span>
                 <span class="chip flat">{j.jd_fetched ? "fetched" : "new"}</span>
               </li>
             {/each}
