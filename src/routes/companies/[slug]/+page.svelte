@@ -10,7 +10,8 @@
   import DomainPicker from "$lib/DomainPicker.svelte";
   import { listJobs, type Job } from "$lib/job";
   import { levelLabel } from "$lib/level";
-  import { fetchJobsForCompany, cancelRun, onRunStep, onRunFinished } from "$lib/pipeline";
+  import { fetchJobsForCompany, cancelRun, onRunStep, onRunFinished, phaseLabel } from "$lib/pipeline";
+  import { getCheck } from "$lib/check";
   import { onRecordChanged } from "$lib/vaultSync";
 
   const slug = $derived(page.params.slug ?? "");
@@ -113,6 +114,8 @@
   let runId = $state<string | null>(null);
   let running = $state(false);
   let progress = $state("");
+  /** Live phase label during a run; result line when finished. Empty when idle. */
+  let phase = $state("");
 
   async function loadJobs() {
     if (!cs.vaultPath) return;
@@ -123,19 +126,77 @@
     if (cs.vaultPath && slug) loadJobs();
   });
 
+  // Cold-load best-effort: if a run is already in progress when the page loads (e.g. the user
+  // navigated here from another page), derive the current phase from the last recorded step.
+  // The live event path (onRunStep) is primary; this is secondary / best-effort.
+  $effect(() => {
+    if (!cs.vaultPath || running || phase) return; // already live or no vault
+    const vp = cs.vaultPath;
+    const currentSlug = slug;
+    (async () => {
+      const { listChecks } = await import("$lib/check");
+      const summaries = await listChecks(vp).catch(() => []);
+      for (const summary of summaries.filter((s) => s.status === "running")) {
+        try {
+          const full = await getCheck(vp, summary.slug);
+          if (!full.companies.includes(currentSlug)) continue;
+          // Found the active run — restore live state.
+          runId = summary.slug;
+          running = true;
+          // Derive next expected stage from the chain order + last recorded step.
+          const chainOrder = ["careers-scrape", "structure-listings", "finalize"];
+          const lastDone = full.steps.filter((s) => s.status === "ok" || s.status === "failed").pop();
+          const lastDoneIdx = lastDone ? chainOrder.indexOf(lastDone.stage) : -1;
+          const nextStage = chainOrder[lastDoneIdx + 1] ?? chainOrder[0];
+          phase = phaseLabel(nextStage, "running") || "Working…";
+          break;
+        } catch {
+          // skip — don't let a bad check abort cold-load
+        }
+      }
+    })();
+  });
+
   // Live progress: per-step + run-finished events for the run we started.
   $effect(() => {
     const subs: (() => void)[] = [];
     let active = true;
     Promise.all([
       onRunStep((e) => {
-        if (e.run_id === runId) progress = `${e.stage}: ${e.status}`;
+        if (e.run_id !== runId) return;
+        // Keep the legacy `progress` string for backward compat; set `phase` to the human phrase.
+        progress = `${e.stage}: ${e.status}`;
+        const label = phaseLabel(e.stage, e.status);
+        if (label) phase = label;
       }),
-      onRunFinished((e) => {
+      onRunFinished(async (e) => {
         if (e.run_id !== runId) return;
         running = false;
         progress = e.status;
-        loadJobs();
+        // Reload jobs (to show newly discovered roles) and the company (to show last_checked).
+        await loadJobs();
+        cs.load();
+        // Build the result line from real data: read the check note for roles_found / failure reason.
+        if (e.status === "complete") {
+          try {
+            const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
+            const n = check?.roles_found ?? jobs.length;
+            phase = `Done · ${n} new role${n === 1 ? "" : "s"}`;
+          } catch {
+            phase = `Done · ${jobs.length} new role${jobs.length === 1 ? "" : "s"}`;
+          }
+        } else if (e.status === "failed") {
+          try {
+            const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
+            const failedStep = check?.steps.find((s) => s.status === "failed");
+            const reason = failedStep?.error ?? "unknown error";
+            phase = `Failed · ${reason}`;
+          } catch {
+            phase = "Failed";
+          }
+        } else {
+          phase = e.status;
+        }
       }),
     ]).then((u) => {
       if (active) subs.push(...u);
@@ -166,10 +227,12 @@
     if (!cs.vaultPath || running) return;
     running = true;
     progress = "starting…";
+    phase = "Starting…";
     try {
       runId = await fetchJobsForCompany(cs.vaultPath, slug);
     } catch (e) {
       progress = `error: ${e}`;
+      phase = `Error: ${e}`;
       running = false;
     }
   }
@@ -219,7 +282,7 @@
       <span class="sub">last checked: {c.last_checked ?? "never checked"}</span>
       <button class="linkbtn" onclick={() => cs.markChecked(c.slug)}>mark checked</button>
       {#if running}
-        <span class="sub">⟳ {progress}</span>
+        <span class="pipeline-phase">{phase || progress}</span>
         <button class="btn sm" onclick={cancelFetch}>Cancel</button>
       {:else}
         <button
@@ -228,6 +291,7 @@
           disabled={!cs.vaultPath || !c.careers_url}
           title={c.careers_url ? "Scrape this company's careers page for roles" : "No careers URL set — add one in Details"}
         >Fetch jobs</button>
+        {#if phase}<span class="pipeline-phase pipeline-phase--done">{phase}</span>{/if}
       {/if}
     </div>
 

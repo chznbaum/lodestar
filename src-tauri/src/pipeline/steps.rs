@@ -45,12 +45,30 @@ use std::path::Path;
 pub trait EventSink: Send + Sync {
     fn step_done(&self, run_id: &str, stage: &str, status: &str);
     fn run_finished(&self, run_id: &str, status: &str);
+    /// Emitted immediately after a task is claimed, before execution. Used by the UI to
+    /// display the current stage label ("Scraping careers page…" etc.) in real time.
+    fn step_started(&self, run_id: &str, stage: &str);
 }
 
 pub struct NoopSink;
 impl EventSink for NoopSink {
     fn step_done(&self, _run_id: &str, _stage: &str, _status: &str) {}
     fn run_finished(&self, _run_id: &str, _status: &str) {}
+    fn step_started(&self, _run_id: &str, _stage: &str) {}
+}
+
+/// Write `last_checked = <today>` on the target company note. Ignores errors (logs them) so a
+/// failed write never aborts the run. Today is derived from the first 10 chars of `run_id`
+/// (the date-prefix `YYYY-MM-DD`).
+fn stamp_checked(vault_path: &str, company_slug: &str, today: &str) {
+    if let Err(e) = crate::company::update_company_field(
+        vault_path.to_string(),
+        company_slug.to_string(),
+        "last_checked".to_string(),
+        today.to_string(),
+    ) {
+        eprintln!("stamp_checked({company_slug}): {e}");
+    }
 }
 
 // Inter-step payloads, carried (durably) in the queue task so a retry re-uses prior output.
@@ -176,6 +194,8 @@ fn fail_run(
         run.finished_at = Some(now_iso());
         let _ = write_check(vault_path, &run);
     }
+    let today = run_id.get(..10).unwrap_or(run_id);
+    stamp_checked(vault_path, company, today);
     eprintln!("run {run_id} failed: {error_msg}");
     sink.run_finished(run_id, "failed");
 }
@@ -202,6 +222,10 @@ pub fn pump_once<S: Scraper, L: Llm>(
         sink.step_done(&task.run_id, &task.stage, "cancelled");
         return Ok(true);
     }
+
+    // Notify the UI that this stage is now executing — emitted before dispatch so the UI can
+    // display the live current-phase label immediately.
+    sink.step_started(&task.run_id, &task.stage);
 
     if task.stage == "careers-scrape" {
         // --- Scrape stage: typed failure + per-class retry policy ---
@@ -325,13 +349,18 @@ pub fn pump_once<S: Scraper, L: Llm>(
             // Terminal failure (retries exhausted): the chain can't proceed — mark the run failed
             // so it doesn't sit "running" forever.
             if task.attempts >= MAX_ATTEMPTS {
+                // Update the check note if it can be loaded (legitimately needs the loaded check).
                 if let Ok(mut run) = get_check(vault_path.to_string(), task.run_id.clone()) {
                     run.status = "failed".into();
                     run.errors += 1;
                     run.finished_at = Some(now_iso());
                     let _ = write_check(vault_path, &run);
-                    sink.run_finished(&task.run_id, "failed");
                 }
+                // stamp_checked and run_finished fire UNCONDITIONALLY — consistent with fail_run().
+                // Even if get_check fails above, we must not leave the run stuck in "running".
+                let today = task.run_id.get(..10).unwrap_or(&task.run_id);
+                stamp_checked(vault_path, &task.target, today);
+                sink.run_finished(&task.run_id, "failed");
             }
         }
     }
@@ -444,6 +473,7 @@ fn dispatch_non_scrape<L: Llm>(
             run.status = "complete".into();
             run.finished_at = Some(now_iso());
             write_check(vault_path, &run)?;
+            stamp_checked(vault_path, company, today);
             Ok(vec![])
         }
         other => Err(format!("unknown stage: {other}")),
@@ -729,6 +759,103 @@ mod tests {
         let wizard_text = std::fs::read_to_string(&wizard_path).unwrap();
         assert!(senior_text.contains("level: senior"), "valid level 'senior' must be written");
         assert!(!wizard_text.contains("level:"), "invalid level 'wizard' must be dropped (None)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// After a successful drain `last_checked` is stamped on the target company note.
+    #[test]
+    fn successful_run_stamps_last_checked() {
+        let (dir, vault) = setup_vault();
+        // Create a company note so stamp_checked has something to update.
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\nstatus: active\n---\n",
+        ).unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-19").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        assert_eq!(run.status, "complete");
+
+        // The company note must now contain `last_checked: 2026-06-19` (the run's date prefix).
+        let company_text = std::fs::read_to_string(dir.join("companies/acme.md")).unwrap();
+        assert!(
+            company_text.contains("last_checked: 2026-06-19"),
+            "successful run must stamp last_checked; got:\n{company_text}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// After a terminal-failure drain `last_checked` is ALSO stamped on the target company note.
+    #[test]
+    fn terminal_failure_stamps_last_checked() {
+        let (dir, vault) = setup_vault();
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\nstatus: active\n---\n",
+        ).unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = ClassFailScraper::new(FailureClass::Terminal, Some(404));
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-19").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        assert_eq!(run.status, "failed");
+
+        // last_checked must be stamped even on terminal failure.
+        let company_text = std::fs::read_to_string(dir.join("companies/acme.md")).unwrap();
+        assert!(
+            company_text.contains("last_checked: 2026-06-19"),
+            "terminal-failure run must stamp last_checked; got:\n{company_text}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// LLM that always returns an error — drives the non-scrape retry-exhausted path.
+    struct AlwaysFailLlm;
+    impl Llm for AlwaysFailLlm {
+        fn complete(&self, _req: &LlmRequest) -> Result<LlmResponse, String> {
+            Err("llm unavailable".into())
+        }
+    }
+
+    /// When the LLM stage exhausts MAX_ATTEMPTS, `last_checked` must be stamped on the target
+    /// company note and the run must be marked `failed` — even if get_check were to fail.
+    #[test]
+    fn llm_exhausted_stamps_last_checked() {
+        let (dir, vault) = setup_vault();
+        // Create a company note so stamp_checked has something to update.
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\nstatus: active\n---\n",
+        ).unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        // Scraper succeeds so we reach the LLM stage.
+        let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
+        let llm = AlwaysFailLlm;
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-19").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        // Run must be marked failed (not left stuck in "running").
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        assert_eq!(run.status, "failed", "LLM-exhausted run must be marked failed; got {:?}", run.status);
+
+        // last_checked must be stamped with the run's date prefix.
+        let company_text = std::fs::read_to_string(dir.join("companies/acme.md")).unwrap();
+        assert!(
+            company_text.contains("last_checked: 2026-06-19"),
+            "LLM-exhausted run must stamp last_checked; got:\n{company_text}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

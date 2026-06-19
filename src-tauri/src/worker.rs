@@ -47,6 +47,12 @@ impl EventSink for TauriSink {
             StepEvent { run_id: run_id.into(), stage: String::new(), status: status.into() },
         );
     }
+    fn step_started(&self, run_id: &str, stage: &str) {
+        let _ = self.app.emit(
+            "run:step",
+            StepEvent { run_id: run_id.into(), stage: stage.into(), status: "running".into() },
+        );
+    }
 }
 
 /// Start a discovery run for one company and drain it on a background thread. Returns the run id

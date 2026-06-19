@@ -27,3 +27,20 @@ export function onRunStep(cb: (e: RunStepEvent) => void): Promise<UnlistenFn> {
 export function onRunFinished(cb: (e: RunStepEvent) => void): Promise<UnlistenFn> {
   return listen<RunStepEvent>("run:finished", (ev) => cb(ev.payload));
 }
+
+/**
+ * Human-readable label for a live pipeline phase.
+ * Returns a non-empty phrase when `status === "running"` (the step has started but not finished);
+ * returns `""` for completed/failed statuses (those are handled by the run-finished result line).
+ */
+export function phaseLabel(stage: string, status: string): string {
+  if (status === "running") {
+    const m: Record<string, string> = {
+      "careers-scrape": "Scraping careers page…",
+      "structure-listings": "Reading listings…",
+      finalize: "Filtering to your titles…",
+    };
+    return m[stage] ?? "Working…";
+  }
+  return "";
+}

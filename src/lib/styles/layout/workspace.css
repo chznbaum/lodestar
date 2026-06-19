@@ -80,6 +80,18 @@
   margin-left: auto;
 }
 
+/* Live pipeline phase label — shown inline next to the Fetch-jobs button while a run is active,
+ * and as a result line ("Done · N new roles" / "Failed · reason") after it completes. */
+.pipeline-phase {
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.pipeline-phase--done {
+  font-style: normal;
+  color: var(--muted);
+}
+
 /* The "rendered markdown" caption inside the Notes panel head — a .sub nested
  * in the heading <span>. Preserves the original `span .sub` left margin (the
  * audit flagged this rule as dead, but it actually styles this nested label;
