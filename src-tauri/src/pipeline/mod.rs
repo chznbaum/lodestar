@@ -2,3 +2,5 @@
 //! discovery chain. Built across Phase A tasks 2–6.
 
 pub mod filter;
+pub mod queue;
+pub mod runner;
