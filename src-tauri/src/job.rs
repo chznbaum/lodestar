@@ -176,6 +176,23 @@ pub fn render_job_note(job: &Job) -> String {
     format!("---\n{yaml}---\n")
 }
 
+/// A job stub's slug: `<title>-<company>` slugified (filename == id == slug).
+#[allow(dead_code)]
+pub fn job_slug(title: &str, company_slug: &str) -> String {
+    note::slugify(&format!("{title}-{company_slug}"))
+}
+
+/// Write a NEW job stub at `<vault>/jobs/<slug>.md`. Errors if a stub already exists (the
+/// pipeline dedups by url before this, so a collision here is a genuine clash, not a re-find).
+#[allow(dead_code)]
+pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<(), String> {
+    let path = Path::new(vault_path).join("jobs").join(format!("{}.md", job.slug));
+    if path.exists() {
+        return Err(format!("job stub already exists: {}", job.slug));
+    }
+    std::fs::write(&path, render_job_note(job)).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +270,25 @@ mod tests {
         assert_eq!(again.tech_stack, vec!["rust".to_string(), "typescript".to_string()]);
         assert_eq!(again.status.as_deref(), Some("reviewed"));
         assert_eq!(again.jd_raw_file.as_deref(), Some("_jd/head-of-eng-acme.md"));
+    }
+
+    #[test]
+    fn job_slug_is_title_plus_company() {
+        assert_eq!(
+            job_slug("Senior Software Engineer", "stripe"),
+            "senior-software-engineer-stripe"
+        );
+    }
+
+    #[test]
+    fn write_job_stub_writes_then_refuses_overwrite() {
+        let dir = std::env::temp_dir().join(format!("lodestar-jobstub-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        let j = parse_job("senior-engineer-stripe", STUB).unwrap();
+        write_job_stub(&vault, &j).unwrap();
+        assert!(dir.join("jobs/senior-engineer-stripe.md").exists());
+        assert!(write_job_stub(&vault, &j).is_err()); // no clobber of an existing stub
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
