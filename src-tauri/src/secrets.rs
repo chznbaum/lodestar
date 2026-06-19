@@ -84,6 +84,7 @@ pub fn is_present(key: &str) -> Result<bool, String> {
 #[cfg(all(target_os = "macos", not(test)))]
 fn is_present_uncached(k: &'static str) -> Result<bool, String> {
     use security_framework::item::{ItemClass, ItemSearchOptions};
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
     match ItemSearchOptions::new()
         .class(ItemClass::generic_password())
         .service(SERVICE)
@@ -91,7 +92,7 @@ fn is_present_uncached(k: &'static str) -> Result<bool, String> {
         .search()
     {
         Ok(_) => Ok(true),
-        Err(e) if e.code() == -25300 => Ok(false), // errSecItemNotFound
+        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(false),
         Err(e) => Err(e.to_string()),
     }
 }

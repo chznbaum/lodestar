@@ -47,14 +47,16 @@ pub trait EventSink: Send + Sync {
     fn run_finished(&self, run_id: &str, status: &str);
     /// Emitted immediately after a task is claimed, before execution. Used by the UI to
     /// display the current stage label ("Scraping careers page…" etc.) in real time.
-    fn step_started(&self, run_id: &str, stage: &str);
+    /// `detail` carries optional sub-phase info (e.g. `Some("stealth")` for the stealth-proxy
+    /// re-enqueue attempt) so the UI can show a more specific label.
+    fn step_started(&self, run_id: &str, stage: &str, detail: Option<&str>);
 }
 
 pub struct NoopSink;
 impl EventSink for NoopSink {
     fn step_done(&self, _run_id: &str, _stage: &str, _status: &str) {}
     fn run_finished(&self, _run_id: &str, _status: &str) {}
-    fn step_started(&self, _run_id: &str, _stage: &str) {}
+    fn step_started(&self, _run_id: &str, _stage: &str, _detail: Option<&str>) {}
 }
 
 /// Write `last_checked = <today>` on the target company note. Ignores errors (logs them) so a
@@ -167,8 +169,9 @@ pub fn start_discovery(
     Ok(run_id)
 }
 
-/// Mark a run as `failed` with a human-readable error, record a failed step so the reason
-/// appears in the `/checks/[id]` steps table, and fire `run_finished`.
+/// Mark a run as `failed` with a human-readable error. The scrape step row was already
+/// written by `run_scrape_step`; here we ONLY annotate its `error` field with the friendly
+/// reason (no second append). A single `write_check` persists everything.
 fn fail_run(
     vault_path: &str,
     run_id: &str,
@@ -176,19 +179,27 @@ fn fail_run(
     error_msg: &str,
     sink: &dyn EventSink,
 ) {
-    // Record the failure as a step so `s.error` shows up in the checks inspector.
-    let _ = record_step(
-        vault_path,
-        run_id,
-        "careers-scrape",
-        "scrape",
-        company,
-        now_iso(),
-        "failed",
-        Some(error_msg.to_string()),
-        None,
-    );
     if let Ok(mut run) = get_check(vault_path.to_string(), run_id.to_string()) {
+        // Find the last failed careers-scrape step (written by run_scrape_step) and annotate
+        // it with the human-readable reason. If none exists (defensive), append one in-memory
+        // rather than writing a second disk record.
+        if let Some(step) = run.steps.iter_mut()
+            .rfind(|s| s.stage == "careers-scrape" && s.status == "failed")
+        {
+            step.error = Some(error_msg.to_string());
+        } else {
+            run.steps.push(crate::check::Step {
+                stage: "careers-scrape".to_string(),
+                class: "scrape".to_string(),
+                target: company.to_string(),
+                status: "failed".to_string(),
+                attempts: 1,
+                started_at: Some(now_iso()),
+                finished_at: Some(now_iso()),
+                error: Some(error_msg.to_string()),
+                cost: None,
+            });
+        }
         run.status = "failed".into();
         run.errors += 1;
         run.finished_at = Some(now_iso());
@@ -217,19 +228,30 @@ pub fn pump_once<S: Scraper, L: Llm>(
         return Ok(false);
     };
     if is_cancelled(&task.run_id) {
-        // the run was cancelled: drop this task and the rest of its chain without dispatching
+        // The run was cancelled: drop this task without dispatching.
         queue.complete(task.id)?;
         sink.step_done(&task.run_id, &task.stage, "cancelled");
+        // Finalize the run exactly once. Subsequent cancelled tasks of the same run see status
+        // already "cancelled" and skip the write. Do NOT stamp last_checked — cancel ≠ "we looked".
+        if let Ok(mut run) = get_check(vault_path.to_string(), task.run_id.clone()) {
+            if run.status != "cancelled" {
+                run.status = "cancelled".into();
+                run.finished_at = Some(now_iso());
+                let _ = write_check(vault_path, &run);
+                sink.run_finished(&task.run_id, "cancelled");
+            }
+        }
         return Ok(true);
     }
 
     // Notify the UI that this stage is now executing — emitted before dispatch so the UI can
     // display the live current-phase label immediately.
-    sink.step_started(&task.run_id, &task.stage);
-
+    // For careers-scrape we decode the payload to pass the proxy tier as `detail`.
     if task.stage == "careers-scrape" {
         // --- Scrape stage: typed failure + per-class retry policy ---
         let p: ScrapePayload = serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
+        let scrape_detail = if p.tier == "stealth" { Some("stealth") } else { None };
+        sink.step_started(&task.run_id, &task.stage, scrape_detail);
         let tier = p.proxy_tier();
         match run_scrape_step(vault_path, &task.run_id, &p.careers_url, &task.target, tier, scraper) {
             Ok(scraped) => {
@@ -252,12 +274,24 @@ pub fn pump_once<S: Scraper, L: Llm>(
                 sink.step_done(&task.run_id, &task.stage, "failed");
                 match scrape_err.class {
                     FailureClass::Terminal => {
-                        // Page is gone — no retry, no escalation, no spend.
+                        // Page is gone (or API key missing) — no retry, no escalation, no spend.
                         let reason = match scrape_err.status {
                             Some(404) => "page not found (404)".to_string(),
                             Some(410) => "page gone (410)".to_string(),
                             Some(s) => format!("terminal error ({s})"),
-                            None => "terminal error".to_string(),
+                            None => {
+                                // No HTTP status: the failure happened before the request (e.g. missing
+                                // API key). Derive the reason from the real body; detect missing-key case.
+                                let body = &scrape_err.body;
+                                if body.to_lowercase().contains("scrapingbee_api_key")
+                                    || body.to_lowercase().contains("no entry")
+                                    || body.to_lowercase().contains("not found")
+                                {
+                                    "ScrapingBee API key not set — add it in Settings".to_string()
+                                } else {
+                                    body.clone()
+                                }
+                            }
                         };
                         queue.kill(task.id, &reason)?;
                         fail_run(vault_path, &task.run_id, &task.target, &reason, sink);
@@ -332,6 +366,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
     }
 
     // --- Non-scrape stages (LLM, script): simple bounded retry via MAX_ATTEMPTS ---
+    sink.step_started(&task.run_id, &task.stage, None);
     match dispatch_non_scrape(&task, vault_path, cfg, llm) {
         Ok(successors) => {
             for s in successors {
@@ -651,10 +686,19 @@ mod tests {
 
         let run = get_check(vault, run_id).unwrap();
         assert_eq!(run.status, "failed", "run must be marked failed");
-        // fail_run must have recorded a failed careers-scrape step with the human reason
-        let failed_step = run.steps.iter().find(|s| s.stage == "careers-scrape" && s.status == "failed");
-        assert!(failed_step.is_some(), "must have a failed careers-scrape step; steps: {:?}", run.steps);
-        let err = failed_step.unwrap().error.as_deref().unwrap_or("");
+
+        // There must be EXACTLY ONE failed careers-scrape step (no duplicate from fail_run).
+        let failed_scrape_steps: Vec<_> = run.steps.iter()
+            .filter(|s| s.stage == "careers-scrape" && s.status == "failed")
+            .collect();
+        assert_eq!(
+            failed_scrape_steps.len(), 1,
+            "must have exactly ONE failed careers-scrape step (no duplicate); steps: {:?}", run.steps
+        );
+        assert_eq!(run.errors, 1, "errors counter must be 1 (failed_count matches errors)");
+
+        // The single step must carry the human reason.
+        let err = failed_scrape_steps[0].error.as_deref().unwrap_or("");
         assert!(
             err.contains("404"),
             "step error must contain the human reason (e.g. '404'), got: {err:?}"
@@ -815,6 +859,38 @@ mod tests {
         assert!(
             company_text.contains("last_checked: 2026-06-19"),
             "terminal-failure run must stamp last_checked; got:\n{company_text}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Cancellation finalizes the run as `cancelled` and must NOT stamp `last_checked`.
+    #[test]
+    fn cancel_finalizes_run_and_does_not_stamp_last_checked() {
+        let (dir, vault) = setup_vault();
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\nstatus: active\n---\n",
+        )
+        .unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        // Scraper would succeed but we never reach it — the run is cancelled immediately.
+        let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-19").unwrap();
+        let cfg = default_config();
+        // is_cancelled returns true for every run_id → every task is cancelled immediately.
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| true).unwrap() {}
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        assert_eq!(run.status, "cancelled", "run must be finalised as cancelled; got {:?}", run.status);
+
+        // last_checked must NOT be set — cancel does not count as a check.
+        let company_text = std::fs::read_to_string(dir.join("companies/acme.md")).unwrap();
+        assert!(
+            !company_text.contains("last_checked"),
+            "cancel must NOT stamp last_checked; got:\n{company_text}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

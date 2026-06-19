@@ -16,6 +16,7 @@ export interface RunStepEvent {
   run_id: string;
   stage: string;
   status: string;
+  detail?: string;
 }
 
 /** Subscribe to per-step progress. Returns an unlisten fn (call it on teardown). */
@@ -32,9 +33,13 @@ export function onRunFinished(cb: (e: RunStepEvent) => void): Promise<UnlistenFn
  * Human-readable label for a live pipeline phase.
  * Returns a non-empty phrase when `status === "running"` (the step has started but not finished);
  * returns `""` for completed/failed statuses (those are handled by the run-finished result line).
+ * `detail` carries optional sub-phase info (e.g. `"stealth"` for the stealth-proxy retry).
  */
-export function phaseLabel(stage: string, status: string): string {
+export function phaseLabel(stage: string, status: string, detail?: string): string {
   if (status === "running") {
+    if (stage === "careers-scrape" && detail === "stealth") {
+      return "Retrying via stealth proxy…";
+    }
     const m: Record<string, string> = {
       "careers-scrape": "Scraping careers page…",
       "structure-listings": "Reading listings…",

@@ -28,6 +28,8 @@ struct StepEvent {
     run_id: String,
     stage: String,
     status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 /// Emits live progress to the frontend via Tauri events.
@@ -38,19 +40,24 @@ impl EventSink for TauriSink {
     fn step_done(&self, run_id: &str, stage: &str, status: &str) {
         let _ = self.app.emit(
             "run:step",
-            StepEvent { run_id: run_id.into(), stage: stage.into(), status: status.into() },
+            StepEvent { run_id: run_id.into(), stage: stage.into(), status: status.into(), detail: None },
         );
     }
     fn run_finished(&self, run_id: &str, status: &str) {
         let _ = self.app.emit(
             "run:finished",
-            StepEvent { run_id: run_id.into(), stage: String::new(), status: status.into() },
+            StepEvent { run_id: run_id.into(), stage: String::new(), status: status.into(), detail: None },
         );
     }
-    fn step_started(&self, run_id: &str, stage: &str) {
+    fn step_started(&self, run_id: &str, stage: &str, detail: Option<&str>) {
         let _ = self.app.emit(
             "run:step",
-            StepEvent { run_id: run_id.into(), stage: stage.into(), status: "running".into() },
+            StepEvent {
+                run_id: run_id.into(),
+                stage: stage.into(),
+                status: "running".into(),
+                detail: detail.map(|s| s.to_string()),
+            },
         );
     }
 }

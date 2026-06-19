@@ -19,4 +19,10 @@ describe("phaseLabel", () => {
     expect(phaseLabel("finalize", "complete")).toBe("");
     expect(phaseLabel("careers-scrape", "failed")).toBe("");
   });
+  it("returns stealth label when careers-scrape running with detail=stealth", () => {
+    expect(phaseLabel("careers-scrape", "running", "stealth")).toBe("Retrying via stealth proxy…");
+  });
+  it("returns normal scrape label when careers-scrape running with no detail", () => {
+    expect(phaseLabel("careers-scrape", "running", undefined)).toBe("Scraping careers page…");
+  });
 });

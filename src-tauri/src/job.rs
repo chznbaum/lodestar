@@ -278,6 +278,7 @@ mod tests {
         assert_eq!(again.tech_stack, vec!["rust".to_string(), "typescript".to_string()]);
         assert_eq!(again.status.as_deref(), Some("reviewed"));
         assert_eq!(again.jd_raw_file.as_deref(), Some("_jd/head-of-eng-acme.md"));
+        assert_eq!(again.level.as_deref(), Some("dept-head"));
     }
 
     #[test]

@@ -23,7 +23,7 @@
     let active = true;
     Promise.all([
       onRunStep((e) => {
-        const label = phaseLabel(e.stage, e.status);
+        const label = phaseLabel(e.stage, e.status, e.detail);
         if (label) {
           currentPhase = { ...currentPhase, [e.run_id]: label };
         }

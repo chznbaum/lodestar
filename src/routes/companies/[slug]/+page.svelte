@@ -166,7 +166,7 @@
         if (e.run_id !== runId) return;
         // Keep the legacy `progress` string for backward compat; set `phase` to the human phrase.
         progress = `${e.stage}: ${e.status}`;
-        const label = phaseLabel(e.stage, e.status);
+        const label = phaseLabel(e.stage, e.status, e.detail);
         if (label) phase = label;
       }),
       onRunFinished(async (e) => {
