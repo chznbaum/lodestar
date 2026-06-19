@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 
 use crate::check::{append_step, Step};
-use crate::scraper::{ScrapeResult, Scraper};
+use crate::scraper::{ProxyTier, ScrapeError, ScrapeResult, Scraper};
 use chrono::Local;
 
 /// Wall-clock timestamp for step start/finish, matching the `checks/` note convention.
@@ -47,26 +47,37 @@ pub(crate) fn record_step(
 
 /// Execute the `careers-scrape` stage: scrape `url`, record an `ok`/`failed` step (cost =
 /// the ScrapingBee credits charged), and return the scraped content for sanitization. On
-/// scraper failure, records a `failed` step and returns the error.
+/// scraper failure, records a `failed` step and propagates the `ScrapeError`.
 pub fn run_scrape_step<S: Scraper>(
     vault_path: &str,
     run_id: &str,
     url: &str,
     target: &str,
+    tier: ProxyTier,
     scraper: &S,
-) -> Result<ScrapeResult, String> {
+) -> Result<ScrapeResult, ScrapeError> {
     let started = now_iso();
-    match scraper.fetch(url) {
+    match scraper.fetch(url, tier) {
         Ok(result) => {
             let cost = result.credits.map(|c| c as i64);
-            record_step(vault_path, run_id, "careers-scrape", "scrape", target, started, "ok", None, cost)?;
+            record_step(vault_path, run_id, "careers-scrape", "scrape", target, started, "ok", None, cost)
+                .map_err(|e| ScrapeError {
+                    status: None,
+                    body: e,
+                    class: crate::scraper::FailureClass::Transient,
+                })?;
             Ok(result)
         }
         Err(e) => {
             record_step(
                 vault_path, run_id, "careers-scrape", "scrape", target, started, "failed",
-                Some(e.clone()), None,
-            )?;
+                Some(e.to_string()), None,
+            )
+            .map_err(|re| ScrapeError {
+                status: None,
+                body: re,
+                class: crate::scraper::FailureClass::Transient,
+            })?;
             Err(e)
         }
     }
@@ -77,6 +88,7 @@ mod tests {
     use super::*;
     use crate::check::{get_check, write_check, Check};
     use crate::scraper::tests::FakeScraper;
+    use crate::scraper::{FailureClass, ScrapeError};
 
     fn open_run(vault: &str) {
         let run = Check {
@@ -103,9 +115,11 @@ mod tests {
         open_run(&vault);
 
         let scraper = FakeScraper { content: "<p>x</p>".into(), credits: 5 };
-        let result =
-            run_scrape_step(&vault, "2026-06-17-0001", "https://stripe.com/careers", "stripe", &scraper)
-                .unwrap();
+        let result = run_scrape_step(
+            &vault, "2026-06-17-0001", "https://stripe.com/careers", "stripe",
+            ProxyTier::Premium, &scraper,
+        )
+        .unwrap();
         assert_eq!(result.content, "<p>x</p>"); // content flows to the next stage
 
         let reread = get_check(vault, "2026-06-17-0001".into()).unwrap();
@@ -125,18 +139,25 @@ mod tests {
 
         struct FailScraper;
         impl Scraper for FailScraper {
-            fn fetch(&self, _url: &str) -> Result<ScrapeResult, String> {
-                Err("403 blocked".into())
+            fn fetch(&self, _url: &str, _tier: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
+                Err(ScrapeError {
+                    status: Some(403),
+                    body: "403 blocked".into(),
+                    class: FailureClass::EscalateProxy,
+                })
             }
         }
-        let err = run_scrape_step(&vault, "2026-06-17-0001", "https://x", "stripe", &FailScraper)
-            .unwrap_err();
-        assert!(err.contains("403"));
+        let err = run_scrape_step(
+            &vault, "2026-06-17-0001", "https://x", "stripe",
+            ProxyTier::Premium, &FailScraper,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("403"));
 
         let reread = get_check(vault, "2026-06-17-0001".into()).unwrap();
         assert_eq!(reread.steps.len(), 1);
         assert_eq!(reread.steps[0].status, "failed");
-        assert_eq!(reread.steps[0].error.as_deref(), Some("403 blocked"));
+        assert!(reread.steps[0].error.as_deref().unwrap_or("").contains("403"));
         assert_eq!(reread.steps[0].cost, None);
         std::fs::remove_dir_all(&dir).ok();
     }

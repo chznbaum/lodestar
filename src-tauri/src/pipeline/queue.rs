@@ -12,7 +12,12 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
+/// Maximum attempts for non-scrape stages (LLM, script) before marking a task dead.
 pub const MAX_ATTEMPTS: u32 = 3;
+
+/// Maximum attempts for transient scrape failures before the run is marked failed.
+/// Kept lower than `MAX_ATTEMPTS` because each scrape attempt costs credits.
+pub const TRANSIENT_SCRAPE_MAX_ATTEMPTS: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewTask {
@@ -41,6 +46,10 @@ pub trait Queue {
     fn complete(&self, id: i64) -> Result<(), String>;
     /// Re-queue (`pending`) if `attempts < MAX_ATTEMPTS`, else mark `dead`; records the error.
     fn fail(&self, id: i64, err: &str) -> Result<(), String>;
+    /// Mark a task `dead` immediately regardless of attempt count; records the error.
+    /// Used for Terminal scrape failures and one-shot escalations that have already been
+    /// re-enqueued as a separate task.
+    fn kill(&self, id: i64, err: &str) -> Result<(), String>;
     fn pending_count(&self) -> Result<usize, String>;
 }
 
@@ -139,6 +148,16 @@ impl Queue for SqliteQueue {
                      last_error = ?2
                  WHERE id = ?3",
                 params![MAX_ATTEMPTS, err, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn kill(&self, id: i64, err: &str) -> Result<(), String> {
+        self.lock()?
+            .execute(
+                "UPDATE tasks SET state='dead', last_error=?1 WHERE id=?2",
+                params![err, id],
             )
             .map_err(|e| e.to_string())?;
         Ok(())

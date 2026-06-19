@@ -15,6 +15,15 @@
 //! drives the queue (claim → dispatch → enqueue successors / retry). The Task-6 worker thread
 //! loops `pump_once` off the tokio reactor with a real Tauri `EventSink`; tests drive it with
 //! the fakes + `NoopSink` (zero spend).
+//!
+//! ## Scrape failure policy (per `FailureClass`)
+//!
+//! - `Terminal`      → mark task dead immediately; mark run `failed` — no retry, no spend.
+//! - `FixEncoding`   → re-issue once with RFC-3986-percent-encoded URL; if still failing, Terminal.
+//! - `EscalateProxy` → re-enqueue once with `ProxyTier::Stealth` (75cr); if still failing, Terminal.
+//!   Never escalate a `Terminal` (404); escalation only fires once (Stealth doesn't escalate again).
+//! - `Transient`     → bounded backoff retry via the queue's `fail()` mechanism, capped at
+//!   `TRANSIENT_SCRAPE_MAX_ATTEMPTS` (≤2). Non-scrape stages (LLM) keep `MAX_ATTEMPTS`.
 #![allow(dead_code)]
 
 use crate::check::{get_check, write_check, Check};
@@ -22,12 +31,12 @@ use crate::config::{model_for, PipelineConfig};
 use crate::job::{job_slug, list_jobs, write_job_stub, Job};
 use crate::llm::Llm;
 use crate::pipeline::filter::{prefilter, RawListing};
-use crate::pipeline::queue::{NewTask, Queue, QueuedTask, MAX_ATTEMPTS};
+use crate::pipeline::queue::{NewTask, Queue, QueuedTask, MAX_ATTEMPTS, TRANSIENT_SCRAPE_MAX_ATTEMPTS};
 use crate::pipeline::runner::{now_iso, record_step, run_scrape_step};
 use crate::profile::read_target_criteria;
 use crate::prompts::{build_structure_listings_prompt, parse_structured_listings, StructuredListing};
 use crate::sanitize::sanitize;
-use crate::scraper::Scraper;
+use crate::scraper::{percent_encode_target_url, FailureClass, ProxyTier, Scraper};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -48,7 +57,26 @@ impl EventSink for NoopSink {
 #[derive(Serialize, Deserialize)]
 struct ScrapePayload {
     careers_url: String,
+    /// Which proxy tier to use. Defaults to `"premium"` on the first attempt;
+    /// set to `"stealth"` when the task is re-enqueued after an `EscalateProxy` failure.
+    #[serde(default = "default_tier")]
+    tier: String,
+    /// `true` when this task was re-enqueued after a `FixEncoding` failure.
+    /// If encoding is already fixed and we fail again, treat the failure as Terminal.
+    #[serde(default)]
+    encoding_fixed: bool,
 }
+
+fn default_tier() -> String {
+    "premium".into()
+}
+
+impl ScrapePayload {
+    fn proxy_tier(&self) -> ProxyTier {
+        if self.tier == "stealth" { ProxyTier::Stealth } else { ProxyTier::Premium }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct StructurePayload {
     sanitized: String,
@@ -105,8 +133,12 @@ pub fn start_discovery(
     };
     write_check(vault_path, &run)?;
 
-    let payload = serde_json::to_string(&ScrapePayload { careers_url: careers_url.to_string() })
-        .map_err(|e| e.to_string())?;
+    let payload = serde_json::to_string(&ScrapePayload {
+        careers_url: careers_url.to_string(),
+        tier: default_tier(),
+        encoding_fixed: false,
+    })
+    .map_err(|e| e.to_string())?;
     queue.enqueue(NewTask {
         run_id: run_id.clone(),
         stage: "careers-scrape".into(),
@@ -115,6 +147,37 @@ pub fn start_discovery(
         payload,
     })?;
     Ok(run_id)
+}
+
+/// Mark a run as `failed` with a human-readable error, record a failed step so the reason
+/// appears in the `/checks/[id]` steps table, and fire `run_finished`.
+fn fail_run(
+    vault_path: &str,
+    run_id: &str,
+    company: &str,
+    error_msg: &str,
+    sink: &dyn EventSink,
+) {
+    // Record the failure as a step so `s.error` shows up in the checks inspector.
+    let _ = record_step(
+        vault_path,
+        run_id,
+        "careers-scrape",
+        "scrape",
+        company,
+        now_iso(),
+        "failed",
+        Some(error_msg.to_string()),
+        None,
+    );
+    if let Ok(mut run) = get_check(vault_path.to_string(), run_id.to_string()) {
+        run.status = "failed".into();
+        run.errors += 1;
+        run.finished_at = Some(now_iso());
+        let _ = write_check(vault_path, &run);
+    }
+    eprintln!("run {run_id} failed: {error_msg}");
+    sink.run_finished(run_id, "failed");
 }
 
 /// Claim and execute at most one queued task. Returns `Ok(true)` if a task was processed,
@@ -139,7 +202,113 @@ pub fn pump_once<S: Scraper, L: Llm>(
         sink.step_done(&task.run_id, &task.stage, "cancelled");
         return Ok(true);
     }
-    match dispatch(&task, vault_path, cfg, scraper, llm) {
+
+    if task.stage == "careers-scrape" {
+        // --- Scrape stage: typed failure + per-class retry policy ---
+        let p: ScrapePayload = serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
+        let tier = p.proxy_tier();
+        match run_scrape_step(vault_path, &task.run_id, &p.careers_url, &task.target, tier, scraper) {
+            Ok(scraped) => {
+                // Success: sanitize and enqueue structure-listings
+                let started = now_iso();
+                let sanitized = sanitize(&scraped.content, &p.careers_url);
+                record_step(vault_path, &task.run_id, "sanitize", "script", &task.target, started, "ok", None, None)?;
+                queue.enqueue(NewTask {
+                    run_id: task.run_id.clone(),
+                    stage: "structure-listings".into(),
+                    class: "llm".into(),
+                    target: task.target.clone(),
+                    payload: serde_json::to_string(&StructurePayload { sanitized })
+                        .map_err(|e| e.to_string())?,
+                })?;
+                queue.complete(task.id)?;
+                sink.step_done(&task.run_id, &task.stage, "ok");
+            }
+            Err(scrape_err) => {
+                sink.step_done(&task.run_id, &task.stage, "failed");
+                match scrape_err.class {
+                    FailureClass::Terminal => {
+                        // Page is gone — no retry, no escalation, no spend.
+                        let reason = match scrape_err.status {
+                            Some(404) => "page not found (404)".to_string(),
+                            Some(410) => "page gone (410)".to_string(),
+                            Some(s) => format!("terminal error ({s})"),
+                            None => "terminal error".to_string(),
+                        };
+                        queue.kill(task.id, &reason)?;
+                        fail_run(vault_path, &task.run_id, &task.target, &reason, sink);
+                    }
+                    FailureClass::FixEncoding => {
+                        if p.encoding_fixed {
+                            // Already re-issued with encoded URL — still failing. Give up.
+                            let reason = "url encoding fix did not resolve the error";
+                            queue.kill(task.id, reason)?;
+                            fail_run(vault_path, &task.run_id, &task.target, reason, sink);
+                        } else {
+                            // Re-issue once with RFC-3986-percent-encoded URL.
+                            let fixed_url = percent_encode_target_url(&p.careers_url);
+                            let new_payload = serde_json::to_string(&ScrapePayload {
+                                careers_url: fixed_url,
+                                tier: p.tier.clone(),
+                                encoding_fixed: true,
+                            })
+                            .map_err(|e| e.to_string())?;
+                            queue.kill(task.id, "re-issuing with encoded url")?;
+                            queue.enqueue(NewTask {
+                                run_id: task.run_id.clone(),
+                                stage: "careers-scrape".into(),
+                                class: "scrape".into(),
+                                target: task.target.clone(),
+                                payload: new_payload,
+                            })?;
+                        }
+                    }
+                    FailureClass::EscalateProxy => {
+                        if p.tier == "stealth" {
+                            // Already escalated to Stealth — still blocked. Give up.
+                            let reason = "blocked — escalated to stealth, still failed";
+                            queue.kill(task.id, reason)?;
+                            fail_run(vault_path, &task.run_id, &task.target, reason, sink);
+                        } else {
+                            // Re-enqueue once with Stealth tier.
+                            let new_payload = serde_json::to_string(&ScrapePayload {
+                                careers_url: p.careers_url.clone(),
+                                tier: "stealth".into(),
+                                encoding_fixed: p.encoding_fixed,
+                            })
+                            .map_err(|e| e.to_string())?;
+                            queue.kill(task.id, "escalating to stealth proxy")?;
+                            queue.enqueue(NewTask {
+                                run_id: task.run_id.clone(),
+                                stage: "careers-scrape".into(),
+                                class: "scrape".into(),
+                                target: task.target.clone(),
+                                payload: new_payload,
+                            })?;
+                        }
+                    }
+                    FailureClass::Transient => {
+                        // Bounded backoff retry, capped at TRANSIENT_SCRAPE_MAX_ATTEMPTS.
+                        let err_str = scrape_err.to_string();
+                        if task.attempts >= TRANSIENT_SCRAPE_MAX_ATTEMPTS {
+                            queue.kill(task.id, &err_str)?;
+                            fail_run(
+                                vault_path, &task.run_id, &task.target,
+                                &format!("transient scrape error after {TRANSIENT_SCRAPE_MAX_ATTEMPTS} attempts: {err_str}"),
+                                sink,
+                            );
+                        } else {
+                            queue.fail(task.id, &err_str)?;
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(true);
+    }
+
+    // --- Non-scrape stages (LLM, script): simple bounded retry via MAX_ATTEMPTS ---
+    match dispatch_non_scrape(&task, vault_path, cfg, llm) {
         Ok(successors) => {
             for s in successors {
                 queue.enqueue(s)?;
@@ -169,33 +338,18 @@ pub fn pump_once<S: Scraper, L: Llm>(
     Ok(true)
 }
 
-/// Execute one pipeline step. Returns the successor task(s) to enqueue (empty when the chain
-/// ends). Records the step's telemetry into the `checks/` note as a side effect.
-fn dispatch<S: Scraper, L: Llm>(
+/// Execute one pipeline step for non-scrape stages (structure-listings, finalize).
+/// Returns the successor task(s) to enqueue (empty when the chain ends).
+/// Records the step's telemetry into the `checks/` note as a side effect.
+fn dispatch_non_scrape<L: Llm>(
     task: &QueuedTask,
     vault_path: &str,
     cfg: &PipelineConfig,
-    scraper: &S,
     llm: &L,
 ) -> Result<Vec<NewTask>, String> {
     let run_id = task.run_id.as_str();
     let company = task.target.as_str();
     match task.stage.as_str() {
-        "careers-scrape" => {
-            let p: ScrapePayload = serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
-            let scraped = run_scrape_step(vault_path, run_id, &p.careers_url, company, scraper)?;
-            let started = now_iso();
-            let sanitized = sanitize(&scraped.content, &p.careers_url);
-            record_step(vault_path, run_id, "sanitize", "script", company, started, "ok", None, None)?;
-            Ok(vec![NewTask {
-                run_id: run_id.to_string(),
-                stage: "structure-listings".into(),
-                class: "llm".into(),
-                target: company.to_string(),
-                payload: serde_json::to_string(&StructurePayload { sanitized })
-                    .map_err(|e| e.to_string())?,
-            }])
-        }
         "structure-listings" => {
             let p: StructurePayload =
                 serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
@@ -300,7 +454,7 @@ mod tests {
     use crate::config::default_config;
     use crate::llm::{Llm, LlmRequest, LlmResponse};
     use crate::pipeline::queue::SqliteQueue;
-    use crate::scraper::{ScrapeResult, Scraper};
+    use crate::scraper::{FailureClass, ProxyTier, ScrapeError, ScrapeResult, Scraper};
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -338,11 +492,12 @@ mod tests {
         calls: Cell<u32>,
     }
     impl Scraper for CountingScraper {
-        fn fetch(&self, _url: &str) -> Result<ScrapeResult, String> {
+        fn fetch(&self, _url: &str, _tier: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
             self.calls.set(self.calls.get() + 1);
             Ok(ScrapeResult { content: self.content.clone(), credits: Some(self.credits) })
         }
     }
+
     struct FlakyLlm {
         reply: String,
         calls: Cell<u32>,
@@ -356,6 +511,40 @@ mod tests {
             } else {
                 Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(20_000) }) // $0.02
             }
+        }
+    }
+
+    /// Scraper that always fails with a given `FailureClass`.
+    struct ClassFailScraper {
+        class: FailureClass,
+        status: Option<u16>,
+        calls: Cell<u32>,
+        /// If set, records which tier was used for each call.
+        last_tier: Cell<Option<ProxyTier>>,
+    }
+    impl ClassFailScraper {
+        fn new(class: FailureClass, status: Option<u16>) -> Self {
+            Self { class, status, calls: Cell::new(0), last_tier: Cell::new(None) }
+        }
+    }
+    impl Scraper for ClassFailScraper {
+        fn fetch(&self, _url: &str, tier: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
+            self.calls.set(self.calls.get() + 1);
+            self.last_tier.set(Some(tier));
+            Err(ScrapeError {
+                status: self.status,
+                body: "fake failure".into(),
+                class: self.class.clone(),
+            })
+        }
+    }
+
+    struct AlwaysOkLlm {
+        reply: String,
+    }
+    impl Llm for AlwaysOkLlm {
+        fn complete(&self, _req: &LlmRequest) -> Result<LlmResponse, String> {
+            Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(10_000) })
         }
     }
 
@@ -395,6 +584,113 @@ mod tests {
         let run = get_check(vault, run_id).unwrap();
         assert_eq!(run.status, "complete"); // recovered to completion
         assert_eq!(run.roles_found, 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn terminal_failure_does_not_retry() {
+        let (dir, vault) = setup_vault();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = ClassFailScraper::new(FailureClass::Terminal, Some(404));
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-18").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        // Scraper called exactly once — Terminal = no retry
+        assert_eq!(scraper.calls.get(), 1, "Terminal must not retry");
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        assert_eq!(run.status, "failed", "run must be marked failed");
+        // Queue is fully drained (no pending tasks remain)
+        assert_eq!(q.pending_count().unwrap(), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn terminal_failure_records_human_reason_in_step() {
+        let (dir, vault) = setup_vault();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        // 404 → Terminal → reason = "page not found (404)"
+        let scraper = ClassFailScraper::new(FailureClass::Terminal, Some(404));
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-18").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        let run = get_check(vault, run_id).unwrap();
+        assert_eq!(run.status, "failed", "run must be marked failed");
+        // fail_run must have recorded a failed careers-scrape step with the human reason
+        let failed_step = run.steps.iter().find(|s| s.stage == "careers-scrape" && s.status == "failed");
+        assert!(failed_step.is_some(), "must have a failed careers-scrape step; steps: {:?}", run.steps);
+        let err = failed_step.unwrap().error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("404"),
+            "step error must contain the human reason (e.g. '404'), got: {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn block_escalates_to_stealth_once() {
+        let (dir, vault) = setup_vault();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = ClassFailScraper::new(FailureClass::EscalateProxy, Some(500));
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-18").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        // Called twice: once with Premium, once with Stealth
+        assert_eq!(scraper.calls.get(), 2, "EscalateProxy must try twice (Premium then Stealth)");
+        // The last call used Stealth
+        assert_eq!(
+            scraper.last_tier.get(),
+            Some(ProxyTier::Stealth),
+            "second call must use Stealth tier"
+        );
+        // Both failed → run is marked failed
+        let run = get_check(vault, run_id).unwrap();
+        assert_eq!(run.status, "failed", "run must be failed after stealth also blocked");
+        assert_eq!(q.pending_count().unwrap(), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn transient_retries_bounded_by_transient_cap() {
+        let (dir, vault) = setup_vault();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = ClassFailScraper::new(FailureClass::Transient, Some(429));
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-18").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        // Should retry up to TRANSIENT_SCRAPE_MAX_ATTEMPTS (2), then fail
+        assert_eq!(
+            scraper.calls.get(),
+            TRANSIENT_SCRAPE_MAX_ATTEMPTS,
+            "Transient scrape retries exactly TRANSIENT_SCRAPE_MAX_ATTEMPTS times"
+        );
+        let run = get_check(vault, run_id).unwrap();
+        assert_eq!(run.status, "failed");
+        assert_eq!(q.pending_count().unwrap(), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn fix_encoding_re_issues_once_then_terminal_if_still_failing() {
+        let (dir, vault) = setup_vault();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = ClassFailScraper::new(FailureClass::FixEncoding, Some(500));
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers?q=a+b", "2026-06-18").unwrap();
+        drain(&q, &vault, &scraper, &llm);
+
+        // Called twice: original URL, then re-issued with encoded URL
+        assert_eq!(scraper.calls.get(), 2, "FixEncoding must re-issue once");
+        let run = get_check(vault, run_id).unwrap();
+        assert_eq!(run.status, "failed", "run must fail if encoding fix didn't help");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

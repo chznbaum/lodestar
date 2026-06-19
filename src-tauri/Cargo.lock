@@ -2294,6 +2294,7 @@ dependencies = [
  "keyring",
  "notify",
  "notify-debouncer-full",
+ "percent-encoding",
  "reqwest",
  "rusqlite",
  "scraper",
