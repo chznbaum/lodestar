@@ -190,7 +190,7 @@ pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<(), String> {
     if path.exists() {
         return Err(format!("job stub already exists: {}", job.slug));
     }
-    std::fs::write(&path, render_job_note(job)).map_err(|e| e.to_string())
+    note::write_note(&path, &render_job_note(job))
 }
 
 #[cfg(test)]

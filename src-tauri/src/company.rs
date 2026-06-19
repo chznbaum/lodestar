@@ -233,7 +233,7 @@ pub fn update_company_field(
     let p = company_path(&vault_path, &slug)?;
     let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
     let updated = set_frontmatter_field(&text, &key, &value)?;
-    std::fs::write(&p, &updated).map_err(|e| e.to_string())?;
+    note::write_note(&p, &updated)?;
     let screen = crate::domain::screening_map(&vault_path);
     parse_company(&slug, &updated, Local::now().date_naive(), &screen)
 }
@@ -247,7 +247,7 @@ pub fn set_company_notes(
     let p = company_path(&vault_path, &slug)?;
     let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
     let updated = set_body(&text, &body)?;
-    std::fs::write(&p, &updated).map_err(|e| e.to_string())?;
+    note::write_note(&p, &updated)?;
     let screen = crate::domain::screening_map(&vault_path);
     parse_company(&slug, &updated, Local::now().date_naive(), &screen)
 }
@@ -276,7 +276,7 @@ pub fn create_company(vault_path: String, company: NewCompany) -> Result<Company
         return Err(format!("a company note already exists at {slug:?}"));
     }
     let text = render_company_note(&slug, &company);
-    std::fs::write(&p, &text).map_err(|e| e.to_string())?;
+    note::write_note(&p, &text)?;
     let screen = crate::domain::screening_map(&vault_path);
     parse_company(&slug, &text, Local::now().date_naive(), &screen)
 }

@@ -29,4 +29,8 @@ export const checksStore = {
       loadedPath = vaultPath;
     }
   },
+  /** Re-fetch for the path already loaded (a no-op before the first load). */
+  async reload() {
+    if (loadedPath) await this.load(loadedPath);
+  },
 };

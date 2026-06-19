@@ -10,6 +10,7 @@
   import DomainPicker from "$lib/DomainPicker.svelte";
   import { listJobs, type Job } from "$lib/job";
   import { fetchJobsForCompany, cancelRun, onRunStep, onRunFinished } from "$lib/pipeline";
+  import { onRecordChanged } from "$lib/vaultSync";
 
   const slug = $derived(page.params.slug ?? "");
   const company = $derived(cs.bySlug(slug));
@@ -142,6 +143,21 @@
     return () => {
       active = false;
       subs.forEach((f) => f());
+    };
+  });
+
+  // External edits to job notes (e.g. in Obsidian) refresh this company's list. Company-note
+  // edits need no handler here — companiesStore reloads centrally (vaultSync) and `company`
+  // derives from it. Run-driven job writes arrive via run:finished above, not the watcher.
+  $effect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    onRecordChanged((e) => {
+      if (e.kind === "job") loadJobs();
+    }).then((fn) => (active ? (unlisten = fn) : fn()));
+    return () => {
+      active = false;
+      unlisten?.();
     };
   });
 

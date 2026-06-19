@@ -11,6 +11,7 @@ mod prompts;
 mod sanitize;
 mod scraper;
 mod secrets;
+mod watcher;
 mod worker;
 
 use tauri::Manager;
@@ -29,6 +30,9 @@ pub fn run() {
                 queue: std::sync::Arc::new(queue),
                 cancelled: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             });
+            // The vault file-watcher is started by the frontend (it owns the vault path) via
+            // `start_vault_watcher`; park an empty slot for its handle here.
+            app.manage(watcher::WatcherState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -46,7 +50,8 @@ pub fn run() {
             config::get_config,
             config::set_config,
             worker::fetch_jobs_for_company,
-            worker::cancel_run
+            worker::cancel_run,
+            watcher::start_vault_watcher
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

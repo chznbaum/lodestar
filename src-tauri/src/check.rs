@@ -137,7 +137,7 @@ fn check_path(vault_path: &str, id: &str) -> Result<PathBuf, String> {
 
 pub fn write_check(vault_path: &str, check: &Check) -> Result<(), String> {
     let p = check_path(vault_path, &check.slug)?;
-    std::fs::write(&p, render_check_note(check)).map_err(|e| e.to_string())
+    note::write_note(&p, &render_check_note(check))
 }
 
 /// Append one step to an existing run and re-persist it (the queue projects each step here).

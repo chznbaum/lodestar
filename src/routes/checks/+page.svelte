@@ -2,6 +2,7 @@
   import { goto } from "$app/navigation";
   import { companiesStore as cs } from "$lib/companies.svelte";
   import { checksStore } from "$lib/checks.svelte";
+  import { onRunFinished } from "$lib/pipeline";
   import { SECRET_KEYS, setSecret, secretPresent } from "$lib/secrets";
 
   // companiesStore owns the vault path (persisted in localStorage); reuse it here.
@@ -9,6 +10,19 @@
     if (cs.vaultPath && !checksStore.loadedFor(cs.vaultPath)) {
       checksStore.load(cs.vaultPath);
     }
+  });
+
+  // A run's check-note writes are self-writes (suppressed by the vault watcher to avoid an echo),
+  // so the ledger refreshes off the pipeline's own terminal event instead. Live step-by-step
+  // progress lives on the company workspace; here we just want the finished run to appear.
+  $effect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    onRunFinished(() => checksStore.reload()).then((fn) => (active ? (unlisten = fn) : fn()));
+    return () => {
+      active = false;
+      unlisten?.();
+    };
   });
 
   function open(id: string) {

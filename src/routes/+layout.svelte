@@ -9,8 +9,25 @@
   import "@fontsource/spline-sans/600.css";
   import "@fontsource/spline-sans/700.css";
   import { page } from "$app/state";
+  import { companiesStore } from "$lib/companies.svelte";
+  import { startVaultSync } from "$lib/vaultSync";
 
   let { children } = $props();
+
+  // One app-lifetime subscription that live-reloads stores when vault notes change on disk
+  // outside the app (e.g. edited in Obsidian). Re-runs if the chosen vault path changes; the
+  // backend watcher and the frontend listener are both torn down/restarted on change.
+  $effect(() => {
+    const path = companiesStore.vaultPath;
+    if (!path) return;
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    startVaultSync(path).then((fn) => (active ? (unlisten = fn) : fn()));
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  });
 
   // Companies is the only built surface; it owns "/" and "/companies/*".
   const onCompanies = $derived(

@@ -29,4 +29,6 @@ keyring = { version = "3", features = ["apple-native"] }
 scraper = "0.27.0"
 reqwest = { version = "0.13.4", features = ["blocking", "brotli", "deflate", "gzip", "json", "query"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+notify = "8.2.0"
+notify-debouncer-full = "0.7.0"
 

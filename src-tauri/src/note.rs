@@ -1,8 +1,54 @@
 //! Generic plain-text note primitives shared by every entity (company, job, check):
-//! frontmatter/body splitting, field-level round-tripping writes, and the
-//! filename → slug eligibility rule. No entity-specific knowledge lives here.
+//! frontmatter/body splitting, field-level round-tripping writes, the single vault-write
+//! choke point, and the filename → slug eligibility rule. No entity-specific knowledge lives here.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
+
+/// Paths the app itself just wrote, each stamped with the time of the write. The vault
+/// file-watcher (`watcher.rs`) consults this to skip the change events our OWN writes produce,
+/// so an in-app edit or a pipeline write never echoes back as a spurious "external change".
+/// Entries are short-lived: a genuine external edit arriving after the TTL is (correctly) NOT
+/// suppressed.
+static SELF_WRITES: LazyLock<Mutex<HashMap<PathBuf, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// How long a recorded self-write masks the matching watcher event — comfortably longer than the
+/// watcher's debounce window, short enough that a later genuine edit to the same file isn't eaten.
+const SELF_WRITE_TTL: Duration = Duration::from_secs(5);
+
+/// The single vault-write choke point: write `contents` to `path`, recording it as a self-write
+/// so the file-watcher ignores the resulting event. EVERY entity write (company/job/check) goes
+/// through here — that invariant is what lets the watcher distinguish our writes from the user's.
+pub fn write_note(path: &Path, contents: &str) -> Result<(), String> {
+    std::fs::write(path, contents).map_err(|e| e.to_string())?;
+    if let Ok(mut m) = SELF_WRITES.lock() {
+        m.insert(canonical(path), Instant::now());
+    }
+    Ok(())
+}
+
+/// Whether `path` was written by the app within `SELF_WRITE_TTL` (a self-write the watcher should
+/// ignore). Consumes the matching record — so a real edit landing right after our write still
+/// reloads — and evicts stale entries while it holds the lock.
+pub fn was_self_write(path: &Path) -> bool {
+    let key = canonical(path);
+    let Ok(mut m) = SELF_WRITES.lock() else {
+        return false;
+    };
+    let now = Instant::now();
+    m.retain(|_, t| now.duration_since(*t) < SELF_WRITE_TTL);
+    m.remove(&key).is_some()
+}
+
+/// Best-effort path normalization so a write and the watcher's event for the same file compare
+/// equal despite symlinks / `.`-segments. Falls back to the path as-given when canonicalization
+/// fails (e.g. the file was since removed — but the app only ever writes, never deletes, notes).
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
 
 /// Assumes the controlled vault note format: the first `\n---` after the opening
 /// fence is the closing delimiter. Not a general YAML parser.
@@ -194,5 +240,21 @@ mod tests {
         assert_eq!(slugify("Solutions by Chazona"), "solutions-by-chazona");
         assert_eq!(slugify("  Acme, Inc.  "), "acme-inc");
         assert_eq!(slugify("!!!"), ""); // caller must reject empty
+    }
+
+    #[test]
+    fn write_note_records_a_consumable_self_write() {
+        let dir = std::env::temp_dir().join(format!("lodestar-selfwrite-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("x.md");
+
+        write_note(&p, "---\nid: x\n---\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "---\nid: x\n---\n"); // it really wrote
+
+        assert!(was_self_write(&p), "our own write is recognized as a self-write");
+        assert!(!was_self_write(&p), "the record is consumed — a later edit is NOT suppressed");
+        assert!(!was_self_write(&dir.join("never.md")), "a path we never wrote is never a self-write");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
