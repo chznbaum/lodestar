@@ -33,3 +33,5 @@ notify = "8.2.0"
 notify-debouncer-full = "0.7.0"
 percent-encoding = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "2"

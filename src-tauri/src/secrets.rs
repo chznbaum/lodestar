@@ -5,6 +5,9 @@
 //! Each key's value is **cached in memory after its first read**, so the OS keychain is
 //! touched at most once per key per session — otherwise macOS prompts for authorization on
 //! every access (presence checks, each pipeline step, every retry → a flood of prompts).
+//!
+//! `is_present` uses a `SecItemCopyMatching` existence query (no `kSecReturnData`) so it
+//! never decrypts the value and therefore never triggers an OS auth prompt.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -53,16 +56,52 @@ pub fn get_secret(key: &str) -> Result<String, String> {
     Ok(v)
 }
 
+/// Check whether a key exists in the keychain without reading (and decrypting) its value.
+///
+/// On macOS in production builds: uses `SecItemCopyMatching` with no `kSecReturnData` —
+/// returns success/not-found without triggering an auth prompt (no decryption occurs).
+///
+/// In test builds: the cfg routes to the keyring-based path so the mock keychain works.
+/// On non-macOS: the keyring-based path is used.
 pub fn is_present(key: &str) -> Result<bool, String> {
     let k = canonical(key)?;
+    // Cache fast-path: a key set or read this session is known present without any keychain call.
+    // This is what makes the round-trip test pass under the mock keychain.
     if cache().lock().map_err(|e| e.to_string())?.contains_key(k) {
         return Ok(true);
     }
+    is_present_uncached(k)
+}
+
+/// Inner existence check, called only on a cache miss.
+///
+/// macOS production path: `SecItemCopyMatching` with `kSecClass=GenericPassword`,
+/// `kSecAttrService="dev.lodestar.lodestar"`, `kSecAttrAccount=<key>`, `kSecMatchLimit=One`,
+/// and **no `kSecReturnData`** — existence-only, no decryption, no OS auth prompt.
+///
+/// Gated out of test builds with `#[cfg(not(test))]` so mock-keychain tests don't bypass
+/// the mock. The condition `any(not(target_os="macos"), test)` covers the fallback.
+#[cfg(all(target_os = "macos", not(test)))]
+fn is_present_uncached(k: &'static str) -> Result<bool, String> {
+    use security_framework::item::{ItemClass, ItemSearchOptions};
+    match ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(SERVICE)
+        .account(k)
+        .search()
+    {
+        Ok(_) => Ok(true),
+        Err(e) if e.code() == -25300 => Ok(false), // errSecItemNotFound
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Fallback: keyring-based existence check (decrypts, but only used in tests behind the mock
+/// and on non-macOS targets where there's no OS auth prompt).
+#[cfg(any(not(target_os = "macos"), test))]
+fn is_present_uncached(k: &'static str) -> Result<bool, String> {
     match entry(k)?.get_password() {
-        Ok(v) => {
-            cache().lock().map_err(|e| e.to_string())?.insert(k, v);
-            Ok(true)
-        }
+        Ok(_) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(e.to_string()),
     }

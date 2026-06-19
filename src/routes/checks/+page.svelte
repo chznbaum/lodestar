@@ -3,7 +3,6 @@
   import { companiesStore as cs } from "$lib/companies.svelte";
   import { checksStore } from "$lib/checks.svelte";
   import { onRunFinished, onRunStep, phaseLabel } from "$lib/pipeline";
-  import { SECRET_KEYS, setSecret, secretPresent } from "$lib/secrets";
 
   // companiesStore owns the vault path (persisted in localStorage); reuse it here.
   $effect(() => {
@@ -57,55 +56,10 @@
     ),
   );
 
-  // ── API keys (OS keychain via the app) ────────────────
-  let keyValues = $state<Record<string, string>>(
-    Object.fromEntries(SECRET_KEYS.map((k) => [k.key, ""])),
-  );
-  let keyPresent = $state<Record<string, boolean>>({});
-  let savingKey = $state<string | null>(null);
-
-  $effect(() => {
-    for (const { key } of SECRET_KEYS) {
-      secretPresent(key).then((p) => (keyPresent[key] = p));
-    }
-  });
-
-  async function saveKey(key: string) {
-    savingKey = key;
-    try {
-      await setSecret(key, keyValues[key]);
-      keyPresent[key] = true;
-      keyValues[key] = ""; // clear the input; we never read the value back
-    } catch (e) {
-      console.error("set_secret failed", e);
-    } finally {
-      savingKey = null;
-    }
-  }
 </script>
 
 <section class="checks">
   <h1>Checks</h1>
-
-  <section class="checks__settings">
-    <div class="panel__head">API keys <span class="sub">stored in your OS keychain — never shown back or written to the vault</span></div>
-    {#each SECRET_KEYS as { key, label } (key)}
-      <div class="keyfield">
-        <label for="key-{key}">{label}</label>
-        <input
-          id="key-{key}"
-          type="password"
-          autocomplete="off"
-          bind:value={keyValues[key]}
-          placeholder={keyPresent[key] ? "•••••••• (set — enter to replace)" : "not set"}
-        />
-        <button class="btn sm" disabled={!keyValues[key] || savingKey === key} onclick={() => saveKey(key)}>
-          {savingKey === key ? "Saving…" : "Save"}
-        </button>
-        <span class="keyfield__status">{keyPresent[key] ? "✓ set" : "— not set"}</span>
-      </div>
-    {/each}
-  </section>
 
   {#if !cs.vaultPath}
     <p class="hint">Choose your <code>jobsearch-vault</code> folder on the Companies page first.</p>

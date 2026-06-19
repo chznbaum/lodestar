@@ -2298,6 +2298,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "scraper",
+ "security-framework 2.11.1",
  "serde",
  "serde_json",
  "serde_yaml",
