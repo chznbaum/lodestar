@@ -499,7 +499,7 @@ fn dispatch_non_scrape<L: Llm>(
                     jd_fetched: false,
                 };
                 if let Err(e) = write_job_stub(vault_path, &job) {
-                    eprintln!("skip stub {}: {e}", job.slug);
+                    eprintln!("failed to write stub {}: {e}", job.slug);
                 }
             }
 

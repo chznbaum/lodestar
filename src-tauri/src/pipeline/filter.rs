@@ -26,18 +26,22 @@ fn is_remote(location: &str) -> bool {
     l.contains("remote") || l.contains("anywhere")
 }
 
-/// Narrow raw listings to deduped, on-target candidates. Drops URLs already in `existing_urls`
-/// (dedup), titles that match no `match_title` (clear non-matches), and — when `remote_only` —
-/// listings with a known non-remote location. An *unknown* location is kept (not a clear
-/// non-match). Input order is preserved.
+/// Narrow raw listings to deduped, on-target candidates. The URL is a job's identity, so we
+/// drop URLs already in `existing_urls` *and* collapse duplicate URLs within this batch
+/// (first occurrence wins) — a posting can surface twice in one scrape. Also drops titles that
+/// match no `match_title` (clear non-matches), and — when `remote_only` — listings with a known
+/// non-remote location. An *unknown* location is kept (not a clear non-match). Input order is
+/// preserved.
 pub fn prefilter(
     listings: Vec<RawListing>,
     criteria: &TargetCriteria,
     existing_urls: &HashSet<String>,
 ) -> Vec<RawListing> {
+    let mut seen: HashSet<String> = HashSet::new();
     listings
         .into_iter()
         .filter(|l| !existing_urls.contains(&l.url))
+        .filter(|l| seen.insert(l.url.clone())) // within-batch dedup-by-url: keep first occurrence
         .filter(|l| title_matches(&l.title, &criteria.match_titles))
         .filter(|l| {
             !criteria.remote_only
@@ -97,5 +101,19 @@ mod tests {
         let ls = vec![listing("AI Engineer", "u1", None)];
         let kept = prefilter(ls, &crit(), &HashSet::new());
         assert_eq!(kept.len(), 1); // unknown location is not a clear non-match
+    }
+
+    #[test]
+    fn dedups_duplicate_urls_within_batch() {
+        // The same posting can surface twice in one scrape (pagination overlap, double-parse).
+        // The URL is identity, so the batch must collapse duplicates against itself — not just
+        // against on-disk URLs. The first occurrence wins; order is otherwise preserved.
+        let ls = vec![
+            listing("Software Engineer", "u1", Some("Remote")),
+            listing("AI Engineer", "u2", Some("Remote")),
+            listing("Software Engineer", "u1", Some("Remote")), // dup of the first by url
+        ];
+        let kept = prefilter(ls, &crit(), &HashSet::new());
+        assert_eq!(kept.iter().map(|l| l.url.as_str()).collect::<Vec<_>>(), vec!["u1", "u2"]);
     }
 }

@@ -17,7 +17,7 @@ pub const VALID_LEVELS: &[&str] = &[
     "vp", "c-suite",
 ];
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Job {
     pub slug: String,
     pub title: String,
@@ -190,15 +190,33 @@ pub fn job_slug(title: &str, company_slug: &str) -> String {
     note::slugify(&format!("{title}-{company_slug}"))
 }
 
-/// Write a NEW job stub at `<vault>/jobs/<slug>.md`. Errors if a stub already exists (the
-/// pipeline dedups by url before this, so a collision here is a genuine clash, not a re-find).
-#[allow(dead_code)]
-pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<(), String> {
-    let path = Path::new(vault_path).join("jobs").join(format!("{}.md", job.slug));
-    if path.exists() {
-        return Err(format!("job stub already exists: {}", job.slug));
+/// First free slug among `base`, `base-2`, `base-3`, … per the `taken` predicate. Distinct jobs
+/// at one company can share a `<title>-<company>` base slug (different URLs); this hands each a
+/// unique, human-readable filename. The bare `base` is preferred; suffixes never renumber, so a
+/// slug stays stable once assigned. Terminates: only finitely many slugs are ever `taken`.
+fn first_free_slug(base: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(base) {
+        return base.to_string();
     }
-    note::write_note(&path, &render_job_note(job))
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|s| !taken(s))
+        .expect("an unused numeric suffix always exists")
+}
+
+/// Write a NEW job stub under `<vault>/jobs/`. `job.slug` is the *base*; if that filename is
+/// taken, a numeric suffix disambiguates (`-2`, `-3`, …) so two distinct roles that share a
+/// `<title>-<company>` slug each get their own note. Returns the slug actually written
+/// (filename == id == slug). The URL is a job's identity and dedup-by-url runs upstream
+/// (`prefilter`), so reaching here always means a genuinely new note — never a re-find.
+#[allow(dead_code)]
+pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<String, String> {
+    let jobs_dir = Path::new(vault_path).join("jobs");
+    let slug = first_free_slug(&job.slug, |s| jobs_dir.join(format!("{s}.md")).exists());
+    let mut note = job.clone();
+    note.slug = slug.clone(); // the `id` frontmatter must match the disambiguated filename
+    note::write_note(&jobs_dir.join(format!("{slug}.md")), &render_job_note(&note))?;
+    Ok(slug)
 }
 
 #[cfg(test)]
@@ -290,14 +308,33 @@ mod tests {
     }
 
     #[test]
-    fn write_job_stub_writes_then_refuses_overwrite() {
+    fn first_free_slug_appends_numeric_suffix_on_collision() {
+        // Bare slug when free; otherwise the first free of base-2, base-3, … (never renumbers).
+        assert_eq!(first_free_slug("base", |s| ["base", "base-2"].contains(&s)), "base-3");
+        assert_eq!(first_free_slug("base", |s| s == "base"), "base-2");
+        assert_eq!(first_free_slug("free", |s| ["base", "base-2"].contains(&s)), "free");
+    }
+
+    #[test]
+    fn write_job_stub_disambiguates_same_title_distinct_jobs() {
         let dir = std::env::temp_dir().join(format!("lodestar-jobstub-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("jobs")).unwrap();
         let vault = dir.to_str().unwrap().to_string();
+
+        // Two genuinely different roles share a title+company (different URLs upstream). Both must
+        // get their own note — the second is disambiguated, never silently dropped.
         let j = parse_job("senior-engineer-stripe", STUB).unwrap();
-        write_job_stub(&vault, &j).unwrap();
+        let slug_a = write_job_stub(&vault, &j).unwrap();
+        let slug_b = write_job_stub(&vault, &j).unwrap();
+        assert_eq!(slug_a, "senior-engineer-stripe");
+        assert_eq!(slug_b, "senior-engineer-stripe-2");
         assert!(dir.join("jobs/senior-engineer-stripe.md").exists());
-        assert!(write_job_stub(&vault, &j).is_err()); // no clobber of an existing stub
+        assert!(dir.join("jobs/senior-engineer-stripe-2.md").exists());
+
+        // The disambiguated note's `id` matches its filename (filename == id == slug).
+        let text_b = std::fs::read_to_string(dir.join("jobs/senior-engineer-stripe-2.md")).unwrap();
+        assert!(text_b.contains("id: senior-engineer-stripe-2"));
+
         std::fs::remove_dir_all(&dir).ok();
     }
 }
