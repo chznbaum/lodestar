@@ -168,4 +168,20 @@ mod tests {
         let result = list_metros("/no/such/lodestar/vault/path");
         assert!(result.unwrap().is_empty());
     }
+
+    #[test]
+    #[ignore = "reads the real vault; run with LODESTAR_VAULT=<path> cargo test -- --ignored --nocapture"]
+    fn smoke_parses_real_vault_metros() {
+        let path = std::env::var("LODESTAR_VAULT").expect("set LODESTAR_VAULT");
+        let metros = list_metros(&path).unwrap();
+        println!("parsed {} metros", metros.len());
+        assert!(metros.len() >= 380, "expected the full US MSA set (~390), got {}", metros.len());
+        assert!(metros.iter().all(|m| m.country == "US"));
+        let idx = MetroIndex::build(&metros);
+        // real resolves through the seeded data
+        assert!(idx.resolve("Norfolk").map_or(false, |s| s.contains("norfolk")));
+        assert!(idx.resolve("Los Angeles").is_some());
+        assert!(idx.resolve("San Juan").is_some());
+        assert_eq!(idx.resolve("Atlantis"), None);
+    }
 }
