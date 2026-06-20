@@ -3,6 +3,7 @@ mod company;
 mod competency;
 mod config;
 mod domain;
+mod fit;
 mod job;
 mod llm;
 mod metro;
