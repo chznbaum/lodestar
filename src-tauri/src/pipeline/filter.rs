@@ -65,6 +65,17 @@ mod tests {
                 "software engineer".into(),
             ],
             remote_only: true,
+            target_levels: vec![],
+            comp_floor: None,
+            comp_target: None,
+            comp_currency: None,
+            employment_types: vec![],
+            open_to_relocation: false,
+            work_authorization: vec![],
+            requires_sponsorship: false,
+            preferred_domains: vec![],
+            avoid_domains: vec![],
+            fit_weights: crate::profile::FitWeights::default(),
         }
     }
     fn listing(t: &str, u: &str, loc: Option<&str>) -> RawListing {
