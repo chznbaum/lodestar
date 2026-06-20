@@ -5,6 +5,7 @@ mod config;
 mod domain;
 mod job;
 mod llm;
+mod metro;
 mod note;
 mod pipeline;
 mod profile;
