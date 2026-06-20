@@ -1,5 +1,6 @@
 mod check;
 mod company;
+mod competency;
 mod config;
 mod domain;
 mod job;
