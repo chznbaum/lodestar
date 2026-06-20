@@ -62,6 +62,8 @@ pub struct Job {
     pub location_constraints: Option<String>,
     pub visa_sponsorship: Option<String>,
     pub relocation: Option<String>,
+    pub countries: Vec<String>,
+    pub metros: Vec<String>,
     pub application_url: Option<String>,
     // Pipeline metadata
     pub date_posted: Option<String>,
@@ -110,6 +112,10 @@ struct Front {
     location_constraints: Option<String>,
     visa_sponsorship: Option<String>,
     relocation: Option<String>,
+    #[serde(default)]
+    countries: Vec<String>,
+    #[serde(default)]
+    metros: Vec<String>,
     application_url: Option<String>,
     // Pipeline metadata
     date_posted: Option<String>,
@@ -170,6 +176,8 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
         location_constraints: f.location_constraints,
         visa_sponsorship: f.visa_sponsorship,
         relocation: f.relocation,
+        countries: f.countries,
+        metros: f.metros,
         application_url: f.application_url,
         date_posted: f.date_posted,
         last_seen: f.last_seen,
@@ -188,7 +196,7 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
 const INT_FIELDS: &[&str] = &["comp_low", "comp_high", "yoe_min", "yoe_max", "fit_score"];
 /// List-typed frontmatter fields — set via `set_job_list_field`, never the scalar writer.
 #[allow(dead_code)]
-const LIST_FIELDS: &[&str] = &["tech_stack", "required_skills", "preferred_skills", "researched"];
+const LIST_FIELDS: &[&str] = &["tech_stack", "required_skills", "preferred_skills", "researched", "countries", "metros"];
 
 /// Deserialize the frontmatter strictly; on failure, sanitize the typed (int/list) fields so a
 /// single malformed value degrades to empty (with a logged warning) and retry — one bad field
@@ -282,6 +290,10 @@ pub fn render_job_note(job: &Job) -> String {
         visa_sponsorship: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         relocation: Option<&'a str>,
+        #[serde(skip_serializing_if = "slice_is_empty")]
+        countries: &'a [String],
+        #[serde(skip_serializing_if = "slice_is_empty")]
+        metros: &'a [String],
         #[serde(skip_serializing_if = "Option::is_none")]
         application_url: Option<&'a str>,
         // Pipeline metadata
@@ -328,6 +340,8 @@ pub fn render_job_note(job: &Job) -> String {
         location_constraints: job.location_constraints.as_deref(),
         visa_sponsorship: job.visa_sponsorship.as_deref(),
         relocation: job.relocation.as_deref(),
+        countries: &job.countries,
+        metros: &job.metros,
         application_url: job.application_url.as_deref(),
         date_posted: job.date_posted.as_deref(),
         last_seen: job.last_seen.as_deref(),
@@ -791,6 +805,29 @@ mod tests {
         // A non-list field is rejected.
         assert!(set_job_list_field(vault.clone(), "senior-engineer-acme".into(), "title".into(), vec!["x".into()]).is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn location_fields_round_trip() {
+        // A job with both countries and metros parses and render→re-parses preserving both.
+        let text = "---\nid: eng-acme\ntitle: Engineer\ncompany: \"[[acme]]\"\ncountries: [\"US\"]\nmetros: [\"washington-arlington-alexandria-dc-va-md-wv\"]\n---\n\n";
+        let j = parse_job("eng-acme", text).unwrap();
+        assert_eq!(j.countries, vec!["US"]);
+        assert_eq!(j.metros, vec!["washington-arlington-alexandria-dc-va-md-wv"]);
+        // round-trip
+        let rendered = render_job_note(&j);
+        let again = parse_job("eng-acme", &rendered).unwrap();
+        assert_eq!(again.countries, vec!["US"]);
+        assert_eq!(again.metros, vec!["washington-arlington-alexandria-dc-va-md-wv"]);
+    }
+
+    #[test]
+    fn location_fields_default_to_empty_when_absent() {
+        // A job note without countries/metros keys parses to empty vecs (serde(default)).
+        let text = "---\nid: eng-acme\ntitle: Engineer\n---\n\n";
+        let j = parse_job("eng-acme", text).unwrap();
+        assert!(j.countries.is_empty());
+        assert!(j.metros.is_empty());
     }
 
     #[test]

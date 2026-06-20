@@ -501,6 +501,8 @@ fn dispatch_non_scrape<L: Llm>(
                     location_constraints: None,
                     visa_sponsorship: None,
                     relocation: None,
+                    countries: vec![],
+                    metros: vec![],
                     application_url: None,
                     date_posted: None,
                     last_seen: Some(today.to_string()),

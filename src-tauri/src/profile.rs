@@ -46,6 +46,9 @@ pub struct TargetCriteria {
     pub preferred_domains: Vec<String>,
     pub avoid_domains: Vec<String>,
     pub fit_weights: FitWeights,
+    // --- location ---
+    pub current_location: Option<String>,
+    pub preferred_locations: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +79,11 @@ struct Front {
     avoid_domains: Vec<String>,
     #[serde(default)]
     fit_weights: FitWeights,
+    // --- location ---
+    #[serde(default)]
+    current_location: Option<String>,
+    #[serde(default)]
+    preferred_locations: Vec<String>,
 }
 
 pub fn parse_target_criteria(text: &str) -> Result<TargetCriteria, String> {
@@ -95,6 +103,8 @@ pub fn parse_target_criteria(text: &str) -> Result<TargetCriteria, String> {
         preferred_domains: f.preferred_domains,
         avoid_domains: f.avoid_domains,
         fit_weights: f.fit_weights,
+        current_location: f.current_location,
+        preferred_locations: f.preferred_locations,
     })
 }
 
@@ -147,6 +157,24 @@ mod tests {
         assert!(!c.requires_sponsorship);
         assert_eq!(c.avoid_domains, vec!["gambling"]);
         assert!((c.fit_weights.skills - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parses_location_fields() {
+        let text = "---\ntype: target_criteria\ncurrent_location: norfolk-va\npreferred_locations: [richmond-va, washington-arlington-alexandria-dc-va-md-wv]\n---\n";
+        let c = parse_target_criteria(text).unwrap();
+        assert_eq!(c.current_location.as_deref(), Some("norfolk-va"));
+        assert_eq!(
+            c.preferred_locations,
+            vec!["richmond-va", "washington-arlington-alexandria-dc-va-md-wv"]
+        );
+    }
+
+    #[test]
+    fn location_fields_default_when_absent() {
+        let c = parse_target_criteria("---\ntype: target_criteria\n---\n").unwrap();
+        assert_eq!(c.current_location, None);
+        assert!(c.preferred_locations.is_empty());
     }
 
     #[test]

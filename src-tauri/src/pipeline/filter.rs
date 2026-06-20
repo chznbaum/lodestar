@@ -76,6 +76,8 @@ mod tests {
             preferred_domains: vec![],
             avoid_domains: vec![],
             fit_weights: crate::profile::FitWeights::default(),
+            current_location: None,
+            preferred_locations: vec![],
         }
     }
     fn listing(t: &str, u: &str, loc: Option<&str>) -> RawListing {
