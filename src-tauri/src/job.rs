@@ -9,6 +9,19 @@ use std::path::Path;
 #[allow(dead_code)]
 pub const JOB_STATUSES: &[&str] = &["new", "reviewed", "pursuing", "skipped"];
 
+// Suppress dead_code until the write helpers (later in this file) start using them.
+#[allow(dead_code)]
+pub const EMPLOYMENT_TYPES: &[&str] = &[
+    "full_time", "part_time", "contract", "fractional", "internship", "temporary",
+];
+
+#[allow(dead_code)]
+pub const REMOTE_KINDS: &[&str] = &["remote", "hybrid", "onsite"];
+
+/// Valid values for `visa_sponsorship` and `relocation`.
+#[allow(dead_code)]
+pub const SPONSORSHIP: &[&str] = &["offered", "not_offered", "unspecified"];
+
 /// Valid machine values for the `level` field. Must stay in sync with the LLM prompt
 /// (`prompts.rs`) and the front-end `LEVEL_LABELS` map (`src/lib/level.ts`).
 pub const VALID_LEVELS: &[&str] = &[
@@ -26,15 +39,37 @@ pub struct Job {
     pub url: Option<String>,
     pub level: Option<String>,
     pub location: Option<String>,
+    // Comp fields
     pub comp_low: Option<i64>,
     pub comp_high: Option<i64>,
     pub comp_currency: Option<String>,
     pub comp_raw: Option<String>,
+    /// "annual" | "monthly" | "hourly" etc.
+    pub comp_period: Option<String>,
+    pub comp_equity: Option<String>,
+    // Role classification
+    pub employment_type: Option<String>,
+    pub yoe_min: Option<i64>,
+    pub yoe_max: Option<i64>,
+    pub tech_stack: Vec<String>,
+    pub required_skills: Vec<String>,
+    pub preferred_skills: Vec<String>,
+    // Org context
+    pub reports_to: Option<String>,
+    pub team: Option<String>,
+    // Location / logistics
+    pub remote: Option<String>,
+    pub location_constraints: Option<String>,
+    pub visa_sponsorship: Option<String>,
+    pub relocation: Option<String>,
+    pub application_url: Option<String>,
+    // Pipeline metadata
     pub date_posted: Option<String>,
     pub last_seen: Option<String>,
     pub ats: Option<String>,
-    pub tech_stack: Vec<String>,
     pub fit_score: Option<i64>,
+    /// Fields filled by the `research-gaps` stage — recorded for provenance.
+    pub researched: Vec<String>,
     /// new | reviewed | pursuing | skipped
     pub status: Option<String>,
     pub skip_reason: Option<String>,
@@ -50,16 +85,39 @@ struct Front {
     url: Option<String>,
     level: Option<String>,
     location: Option<String>,
+    // Comp fields
     comp_low: Option<i64>,
     comp_high: Option<i64>,
     comp_currency: Option<String>,
     comp_raw: Option<String>,
+    comp_period: Option<String>,
+    comp_equity: Option<String>,
+    // Role classification
+    employment_type: Option<String>,
+    yoe_min: Option<i64>,
+    yoe_max: Option<i64>,
+    #[serde(default)]
+    tech_stack: Vec<String>,
+    #[serde(default)]
+    required_skills: Vec<String>,
+    #[serde(default)]
+    preferred_skills: Vec<String>,
+    // Org context
+    reports_to: Option<String>,
+    team: Option<String>,
+    // Location / logistics
+    remote: Option<String>,
+    location_constraints: Option<String>,
+    visa_sponsorship: Option<String>,
+    relocation: Option<String>,
+    application_url: Option<String>,
+    // Pipeline metadata
     date_posted: Option<String>,
     last_seen: Option<String>,
     ats: Option<String>,
-    #[serde(default)]
-    tech_stack: Vec<String>,
     fit_score: Option<i64>,
+    #[serde(default)]
+    researched: Vec<String>,
     status: Option<String>,
     skip_reason: Option<String>,
     jd_raw_file: Option<String>,
@@ -85,7 +143,7 @@ pub fn validate_job_status(status: &str) -> Result<(), String> {
 
 pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
     let (fm, body) = split_frontmatter(text);
-    let f: Front = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
+    let f: Front = parse_front_lenient(slug, fm)?;
     let jd_fetched = f.jd_raw_file.is_some() || body.contains("## JD — structured");
     Ok(Job {
         slug: slug.to_string(),
@@ -98,16 +156,59 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
         comp_high: f.comp_high,
         comp_currency: f.comp_currency,
         comp_raw: f.comp_raw,
+        comp_period: f.comp_period,
+        comp_equity: f.comp_equity,
+        employment_type: f.employment_type,
+        yoe_min: f.yoe_min,
+        yoe_max: f.yoe_max,
+        tech_stack: f.tech_stack,
+        required_skills: f.required_skills,
+        preferred_skills: f.preferred_skills,
+        reports_to: f.reports_to,
+        team: f.team,
+        remote: f.remote,
+        location_constraints: f.location_constraints,
+        visa_sponsorship: f.visa_sponsorship,
+        relocation: f.relocation,
+        application_url: f.application_url,
         date_posted: f.date_posted,
         last_seen: f.last_seen,
         ats: f.ats,
-        tech_stack: f.tech_stack,
         fit_score: f.fit_score,
+        researched: f.researched,
         status: f.status,
         skip_reason: f.skip_reason,
         jd_raw_file: f.jd_raw_file,
         jd_fetched,
     })
+}
+
+/// Integer-typed frontmatter fields — validated on write, coerced/degraded on read.
+#[allow(dead_code)]
+const INT_FIELDS: &[&str] = &["comp_low", "comp_high", "yoe_min", "yoe_max", "fit_score"];
+/// List-typed frontmatter fields — set via `set_job_list_field`, never the scalar writer.
+#[allow(dead_code)]
+const LIST_FIELDS: &[&str] = &["tech_stack", "required_skills", "preferred_skills", "researched"];
+
+/// Deserialize the frontmatter strictly; on failure, sanitize the typed (int/list) fields so a
+/// single malformed value degrades to empty (with a logged warning) and retry — one bad field
+/// never makes the whole note vanish. A note that's still unparseable returns the original error.
+fn parse_front_lenient(slug: &str, fm: &str) -> Result<Front, String> {
+    let orig = match serde_yaml::from_str::<Front>(fm) {
+        Ok(f) => return Ok(f),
+        Err(e) => e,
+    };
+    let mut value: serde_yaml::Value =
+        serde_yaml::from_str(fm).map_err(|_| format!("{slug}: {orig}"))?;
+    let serde_yaml::Value::Mapping(map) = &mut value else {
+        return Err(format!("{slug}: {orig}"));
+    };
+    let warnings = note::sanitize_typed_fields(map, INT_FIELDS, LIST_FIELDS);
+    let f = serde_yaml::from_value::<Front>(value).map_err(|_| format!("{slug}: {orig}"))?;
+    for w in &warnings {
+        eprintln!("{slug}: {w}");
+    }
+    Ok(f)
 }
 
 #[tauri::command]
@@ -116,6 +217,12 @@ pub fn list_jobs(vault_path: String) -> Result<Vec<Job>, String> {
     let mut out = note::read_notes_in(&dir, parse_job)?;
     out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     Ok(out)
+}
+
+/// `skip_serializing_if` helper for `&[String]` fields in the `Fm` struct — serde passes
+/// `&&[String]` to the predicate so `Vec::is_empty` doesn't match the type.
+fn slice_is_empty(v: &&[String]) -> bool {
+    v.is_empty()
 }
 
 /// Build a job note's text from scalar fields (used by the pipeline to write a stub).
@@ -136,6 +243,7 @@ pub fn render_job_note(job: &Job) -> String {
         level: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         location: Option<&'a str>,
+        // Comp fields
         #[serde(skip_serializing_if = "Option::is_none")]
         comp_low: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,14 +253,49 @@ pub fn render_job_note(job: &Job) -> String {
         #[serde(skip_serializing_if = "Option::is_none")]
         comp_raw: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        comp_period: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        comp_equity: Option<&'a str>,
+        // Role classification
+        #[serde(skip_serializing_if = "Option::is_none")]
+        employment_type: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        yoe_min: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        yoe_max: Option<i64>,
+        tech_stack: &'a [String], // always emitted (mirrors company.rs domain/business_model)
+        #[serde(skip_serializing_if = "slice_is_empty")]
+        required_skills: &'a [String],
+        #[serde(skip_serializing_if = "slice_is_empty")]
+        preferred_skills: &'a [String],
+        // Org context
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reports_to: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        team: Option<&'a str>,
+        // Location / logistics
+        #[serde(skip_serializing_if = "Option::is_none")]
+        remote: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        location_constraints: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visa_sponsorship: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        relocation: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        application_url: Option<&'a str>,
+        // Pipeline metadata
+        #[serde(skip_serializing_if = "Option::is_none")]
         date_posted: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         last_seen: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         ats: Option<&'a str>,
-        tech_stack: &'a [String], // always emitted (mirrors company.rs domain/business_model)
         #[serde(skip_serializing_if = "Option::is_none")]
         fit_score: Option<i64>,
+        /// Populated fields from the research-gaps stage; omit when empty.
+        #[serde(skip_serializing_if = "slice_is_empty")]
+        researched: &'a [String],
         #[serde(skip_serializing_if = "Option::is_none")]
         status: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -171,11 +314,26 @@ pub fn render_job_note(job: &Job) -> String {
         comp_high: job.comp_high,
         comp_currency: job.comp_currency.as_deref(),
         comp_raw: job.comp_raw.as_deref(),
+        comp_period: job.comp_period.as_deref(),
+        comp_equity: job.comp_equity.as_deref(),
+        employment_type: job.employment_type.as_deref(),
+        yoe_min: job.yoe_min,
+        yoe_max: job.yoe_max,
+        tech_stack: &job.tech_stack,
+        required_skills: &job.required_skills,
+        preferred_skills: &job.preferred_skills,
+        reports_to: job.reports_to.as_deref(),
+        team: job.team.as_deref(),
+        remote: job.remote.as_deref(),
+        location_constraints: job.location_constraints.as_deref(),
+        visa_sponsorship: job.visa_sponsorship.as_deref(),
+        relocation: job.relocation.as_deref(),
+        application_url: job.application_url.as_deref(),
         date_posted: job.date_posted.as_deref(),
         last_seen: job.last_seen.as_deref(),
         ats: job.ats.as_deref(),
-        tech_stack: &job.tech_stack,
         fit_score: job.fit_score,
+        researched: &job.researched,
         status: job.status.as_deref(),
         skip_reason: job.skip_reason.as_deref(),
         jd_raw_file: job.jd_raw_file.as_deref(),
@@ -219,11 +377,185 @@ pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<String, String> {
     Ok(slug)
 }
 
+/// Map an enum-validated field name to its allowed value set. Other fields are free text.
+#[allow(dead_code)]
+fn enum_values_for(field: &str) -> Option<&'static [&'static str]> {
+    match field {
+        "level" => Some(VALID_LEVELS),
+        "employment_type" => Some(EMPLOYMENT_TYPES),
+        "remote" => Some(REMOTE_KINDS),
+        "visa_sponsorship" | "relocation" => Some(SPONSORSHIP),
+        "status" => Some(JOB_STATUSES),
+        _ => None,
+    }
+}
+
+/// Type-aware field-level frontmatter write. Validates and YAML-safe-encodes `value` per the
+/// field's type so arbitrary (e.g. LLM-produced) input can't corrupt the note: enum fields reject
+/// out-of-set values; integer fields reject non-numeric input; every other field is written as a
+/// quoted-when-needed scalar. List fields must use `set_job_list_field`. An empty value clears the
+/// field. The write lands via the single choke point.
+#[allow(dead_code)]
+#[tauri::command]
+pub fn update_job_field(
+    vault_path: String,
+    slug: String,
+    field: String,
+    value: String,
+) -> Result<(), String> {
+    if LIST_FIELDS.contains(&field.as_str()) {
+        return Err(format!("{field} is a list field; use set_job_list_field"));
+    }
+    let fragment = if value.is_empty() {
+        String::new() // clears the field (serialized as `field:` → null → None)
+    } else if let Some(allowed) = enum_values_for(&field) {
+        if !allowed.contains(&value.as_str()) {
+            return Err(format!(
+                "invalid {field} value {value:?}; expected one of {allowed:?}"
+            ));
+        }
+        note::yaml_scalar(&value)?
+    } else if INT_FIELDS.contains(&field.as_str()) {
+        let n: i64 = value
+            .trim()
+            .parse()
+            .map_err(|_| format!("{field} expects an integer, got {value:?}"))?;
+        n.to_string()
+    } else {
+        note::yaml_scalar(&value)?
+    };
+    let path = Path::new(&vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let updated = note::set_frontmatter_field(&text, &field, &fragment)?;
+    note::write_note(&path, &updated)
+}
+
+/// Set a list-typed job field (tech_stack/required_skills/preferred_skills/researched) to `values`,
+/// written as a YAML-safe flow sequence so items with commas/colons/quotes round-trip exactly.
+/// Rejects non-list fields. An empty `values` writes `[]` (clears the list).
+#[allow(dead_code)]
+#[tauri::command]
+pub fn set_job_list_field(
+    vault_path: String,
+    slug: String,
+    field: String,
+    values: Vec<String>,
+) -> Result<(), String> {
+    if !LIST_FIELDS.contains(&field.as_str()) {
+        return Err(format!("{field} is not a list field"));
+    }
+    let fragment = note::yaml_flow_seq(&values)?;
+    let path = Path::new(&vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let updated = note::set_frontmatter_field(&text, &field, &fragment)?;
+    note::write_note(&path, &updated)
+}
+
+/// Set the job's status (validated) and optionally record a skip_reason.
+#[allow(dead_code)]
+#[tauri::command]
+pub fn set_job_status(
+    vault_path: String,
+    slug: String,
+    status: String,
+    skip_reason: Option<String>,
+) -> Result<(), String> {
+    validate_job_status(&status)?;
+    update_job_field(vault_path.clone(), slug.clone(), "status".into(), status)?;
+    if let Some(r) = skip_reason {
+        update_job_field(vault_path, slug, "skip_reason".into(), r)?;
+    }
+    Ok(())
+}
+
+/// Insert-or-replace a single `## heading` section in the job note's body, leaving frontmatter
+/// and all other sections untouched. `heading` must include the leading `## `.
+#[allow(dead_code)]
+pub fn set_job_section(
+    vault_path: &str,
+    slug: &str,
+    heading: &str,
+    markdown: &str,
+) -> Result<(), String> {
+    let path = Path::new(vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let (_fm, body) = note::split_frontmatter(&text);
+    let new_section = format!("{heading}\n\n{}\n", markdown.trim());
+    let new_body = upsert_section(body, heading.trim(), &new_section);
+    let updated = note::set_body(&text, &new_body)?;
+    note::write_note(&path, &updated)
+}
+
+/// Rebuild `body` with the `## ` section whose heading equals `target` (trimmed) replaced by
+/// `new_section`, or `new_section` appended if no such section exists. Every other section — and
+/// any preamble before the first heading — is preserved. `new_section` is the full replacement
+/// text including its own heading line. Sections are re-joined with a single blank-line separator.
+#[allow(dead_code)]
+fn upsert_section(body: &str, target: &str, new_section: &str) -> String {
+    // Partition into chunks, each beginning at a `## ` heading. Lines before the first heading
+    // form a leading preamble chunk so nothing is dropped.
+    let mut chunks: Vec<String> = Vec::new();
+    for line in body.lines() {
+        if line.starts_with("## ") || chunks.is_empty() {
+            chunks.push(String::new());
+        }
+        let chunk = chunks.last_mut().expect("chunk pushed above");
+        chunk.push_str(line);
+        chunk.push('\n');
+    }
+
+    // Replace the first chunk whose heading matches; otherwise append.
+    let mut replaced = false;
+    for chunk in &mut chunks {
+        let heading = chunk.lines().next().unwrap_or("");
+        if heading.trim() == target {
+            *chunk = new_section.to_string();
+            replaced = true;
+            break;
+        }
+    }
+    if !replaced {
+        chunks.push(new_section.to_string());
+    }
+
+    chunks
+        .iter()
+        .map(|c| c.trim_end())
+        .filter(|c| !c.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const STUB: &str = "---\nid: senior-engineer-stripe\ntitle: \"Senior Engineer\"\ncompany: \"[[stripe]]\"\nurl: https://stripe.com/jobs/123\nlevel: senior\nlocation: Remote (US)\nats: greenhouse\nstatus: new\nlast_seen: 2026-06-17\n---\n\n";
+
+    const DETAIL: &str = "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\nlevel: senior\ncomp_low: 180000\ncomp_high: 220000\ncomp_currency: USD\ncomp_period: annual\ncomp_equity: \"0.1-0.4%\"\nemployment_type: full_time\nyoe_min: 5\nyoe_max: 8\ntech_stack: [\"rust\"]\nrequired_skills: [\"rust\", \"distributed-systems\"]\npreferred_skills: [\"kubernetes\"]\nreports_to: CTO\nteam: Platform\nremote: remote\nlocation_constraints: \"US only\"\nvisa_sponsorship: not_offered\nrelocation: unspecified\napplication_url: https://acme.com/apply/1\nfit_score: 72\nresearched: [\"comp_low\", \"comp_high\"]\nstatus: reviewed\n---\n\n## JD — structured\n\nbody\n";
+
+    #[test]
+    fn parses_and_renders_all_jd_detail_fields() {
+        let j = parse_job("senior-engineer-acme", DETAIL).unwrap();
+        assert_eq!(j.comp_period.as_deref(), Some("annual"));
+        assert_eq!(j.employment_type.as_deref(), Some("full_time"));
+        assert_eq!(j.yoe_min, Some(5));
+        assert_eq!(j.required_skills, vec!["rust", "distributed-systems"]);
+        assert_eq!(j.remote.as_deref(), Some("remote"));
+        assert_eq!(j.visa_sponsorship.as_deref(), Some("not_offered"));
+        assert_eq!(j.researched, vec!["comp_low", "comp_high"]);
+        // round-trip preserves them
+        let again = parse_job("senior-engineer-acme", &render_job_note(&j)).unwrap();
+        assert_eq!(again.required_skills, j.required_skills);
+        assert_eq!(again.relocation.as_deref(), Some("unspecified"));
+        assert_eq!(again.fit_score, Some(72));
+    }
 
     const FETCHED: &str = "---\nid: head-of-eng-acme\ntitle: \"Head of Engineering\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/9\nlevel: dept-head\ncomp_low: 200000\ncomp_high: 260000\ncomp_currency: USD\ntech_stack: [\"rust\", \"typescript\"]\nfit_score: 8\nstatus: reviewed\njd_raw_file: _jd/head-of-eng-acme.md\n---\n\n## JD — structured\n\nstuff\n";
 
@@ -336,5 +668,141 @@ mod tests {
         assert!(text_b.contains("id: senior-engineer-stripe-2"));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_job_field_validates_enums_and_writes() {
+        let dir = std::env::temp_dir().join(format!("lodestar-jobwrite-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        std::fs::write(dir.join("jobs/senior-engineer-acme.md"), DETAIL).unwrap();
+
+        // good value persists
+        update_job_field(vault.clone(), "senior-engineer-acme".into(), "remote".into(), "hybrid".into()).unwrap();
+        let j = parse_job("senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap()).unwrap();
+        assert_eq!(j.remote.as_deref(), Some("hybrid"));
+
+        // bad enum value rejected, file unchanged
+        assert!(update_job_field(vault.clone(), "senior-engineer-acme".into(), "employment_type".into(), "wizard".into()).is_err());
+
+        // status + skip_reason
+        set_job_status(vault.clone(), "senior-engineer-acme".into(), "skipped".into(), Some("comp below floor".into())).unwrap();
+        let j2 = parse_job("senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap()).unwrap();
+        assert_eq!(j2.status.as_deref(), Some("skipped"));
+        assert_eq!(j2.skip_reason.as_deref(), Some("comp below floor"));
+
+        // body section upsert preserves frontmatter + adds the heading
+        set_job_section(&vault, "senior-engineer-acme", "## Alignment analysis", "Strong fit.").unwrap();
+        let txt = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
+        assert!(txt.contains("## Alignment analysis"));
+        assert!(txt.contains("Strong fit."));
+        assert!(txt.contains("title:")); // frontmatter intact
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_job_section_preserves_sibling_sections() {
+        let dir = std::env::temp_dir().join(format!("lodestar-jobsec-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap();
+        let start = "---\nid: x\ntitle: X\n---\n\n## JD — structured\n\njd text\n\n## Outreach notes\n\nping someone\n";
+        std::fs::write(dir.join("jobs/x.md"), start).unwrap();
+        set_job_section(vault, "x", "## Alignment analysis", "fits well").unwrap();
+        let t = std::fs::read_to_string(dir.join("jobs/x.md")).unwrap();
+        assert!(t.contains("## JD — structured") && t.contains("jd text"));
+        assert!(t.contains("## Outreach notes") && t.contains("ping someone"));
+        assert!(t.contains("## Alignment analysis") && t.contains("fits well"));
+        // re-running replaces, not duplicates
+        set_job_section(vault, "x", "## Alignment analysis", "fits very well").unwrap();
+        let t2 = std::fs::read_to_string(dir.join("jobs/x.md")).unwrap();
+        assert_eq!(t2.matches("## Alignment analysis").count(), 1);
+        assert!(t2.contains("fits very well") && !t2.contains("fits well\n"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_job_section_replaces_middle_section_cleanly() {
+        let dir = std::env::temp_dir().join(format!("lodestar-jobmid-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap();
+        // The replaced section ("## JD — structured") has siblings AFTER it — the realistic
+        // re-run case where structure-jd reruns after research-gaps/alignment already appended.
+        let start = "---\nid: y\ntitle: Y\n---\n\n## JD — structured\n\nold jd\n\n## Research notes\n\nnotes\n\n## Alignment analysis\n\nfits\n";
+        std::fs::write(dir.join("jobs/y.md"), start).unwrap();
+        set_job_section(vault, "y", "## JD — structured", "new jd").unwrap();
+        let t = std::fs::read_to_string(dir.join("jobs/y.md")).unwrap();
+        // Replacement landed, exactly once, no stale content.
+        assert_eq!(t.matches("## JD — structured").count(), 1);
+        assert!(t.contains("new jd") && !t.contains("old jd"));
+        // Siblings below the replaced section survive intact.
+        assert!(t.contains("## Research notes") && t.contains("notes"));
+        assert!(t.contains("## Alignment analysis") && t.contains("fits"));
+        // No internal sentinel ever reaches the note body.
+        assert!(!t.contains('\u{0}'), "sentinel leaked into note body:\n{t}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_job_field_validates_and_safely_encodes_by_type() {
+        let dir = std::env::temp_dir().join(format!("lodestar-jobtyped-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        std::fs::write(dir.join("jobs/senior-engineer-acme.md"), DETAIL).unwrap();
+        let read = || {
+            parse_job(
+                "senior-engineer-acme",
+                &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap(),
+            )
+            .unwrap()
+        };
+
+        // Free text with YAML-special chars round-trips EXACTLY (the corruption case).
+        let tricky = "US only; sponsorship: no, prefers \"west coast\" [note]";
+        update_job_field(vault.clone(), "senior-engineer-acme".into(), "location_constraints".into(), tricky.into()).unwrap();
+        assert_eq!(read().location_constraints.as_deref(), Some(tricky));
+
+        // Integer field: valid persists; non-numeric is rejected and the file is unchanged.
+        update_job_field(vault.clone(), "senior-engineer-acme".into(), "comp_low".into(), "150000".into()).unwrap();
+        assert_eq!(read().comp_low, Some(150000));
+        assert!(update_job_field(vault.clone(), "senior-engineer-acme".into(), "comp_low".into(), "lots".into()).is_err());
+        assert_eq!(read().comp_low, Some(150000)); // rejected write left it untouched
+
+        // List field can't be set through the scalar writer.
+        assert!(update_job_field(vault.clone(), "senior-engineer-acme".into(), "required_skills".into(), "rust".into()).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_job_list_field_round_trips_special_items() {
+        let dir = std::env::temp_dir().join(format!("lodestar-joblist-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        std::fs::write(dir.join("jobs/senior-engineer-acme.md"), DETAIL).unwrap();
+        let items = vec!["rust".to_string(), "distributed systems".to_string(), "a, b".to_string()];
+        set_job_list_field(vault.clone(), "senior-engineer-acme".into(), "required_skills".into(), items.clone()).unwrap();
+        let j = parse_job(
+            "senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(j.required_skills, items);
+        // A non-list field is rejected.
+        assert!(set_job_list_field(vault.clone(), "senior-engineer-acme".into(), "title".into(), vec!["x".into()]).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parse_job_degrades_bad_typed_fields_instead_of_failing() {
+        // comp_low is non-numeric and required_skills is a scalar (not a list): both degrade to
+        // empty and the note still loads — it must not vanish over one malformed field.
+        let bad = "---\nid: x\ntitle: X\ncomp_low: lots\ncomp_high: 200000\nrequired_skills: rust\nremote: remote\n---\n\nbody\n";
+        let j = parse_job("x", bad).unwrap();
+        assert_eq!(j.comp_low, None);
+        assert_eq!(j.comp_high, Some(200000));
+        assert!(j.required_skills.is_empty());
+        assert_eq!(j.remote.as_deref(), Some("remote"));
+        assert_eq!(j.title, "X");
     }
 }

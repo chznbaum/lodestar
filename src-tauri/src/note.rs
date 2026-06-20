@@ -92,6 +92,97 @@ pub fn set_body(text: &str, body: &str) -> Result<String, String> {
     Ok(format!("{}\n{}\n", text[..close_end].trim_end(), body))
 }
 
+/// Encode `s` as a single-line YAML scalar safe to splice into `key: <scalar>`. The value always
+/// round-trips back to the exact string — colons, leading indicators (`[`, `#`, `-`, …),
+/// numeric-/bool-/null-looking text, and quotes are quoted as needed by `serde_yaml`. Errors on an
+/// embedded newline (a no-newline input never yields a multi-line scalar).
+pub fn yaml_scalar(s: &str) -> Result<String, String> {
+    if s.contains(['\n', '\r']) {
+        return Err("value must not contain newlines".into());
+    }
+    let out = serde_yaml::to_string(&s).map_err(|e| e.to_string())?;
+    Ok(out.trim_end().to_string())
+}
+
+/// Encode `items` as a single-line YAML flow sequence (`["a", "b"]`) safe to splice into
+/// `key: <seq>`. Every item is double-quoted (and `\`/`"` escaped), so commas, colons, brackets,
+/// and number-/bool-looking tokens all round-trip as exact strings. Errors on a newline in an item.
+pub fn yaml_flow_seq(items: &[String]) -> Result<String, String> {
+    let mut parts = Vec::with_capacity(items.len());
+    for it in items {
+        if it.contains(['\n', '\r']) {
+            return Err("list item must not contain newlines".into());
+        }
+        parts.push(yaml_dquote(it));
+    }
+    Ok(format!("[{}]", parts.join(", ")))
+}
+
+/// A YAML double-quoted scalar of `s` (`\` and `"` escaped). Always safe in flow context.
+fn yaml_dquote(s: &str) -> String {
+    let mut q = String::with_capacity(s.len() + 2);
+    q.push('"');
+    for ch in s.chars() {
+        match ch {
+            '\\' => q.push_str("\\\\"),
+            '"' => q.push_str("\\\""),
+            _ => q.push(ch),
+        }
+    }
+    q.push('"');
+    q
+}
+
+/// Make a parsed frontmatter `Mapping` tolerant of malformed typed fields, so one bad value
+/// degrades that field to empty instead of failing the whole note. For each `int_field`: a numeric
+/// string is coerced to an integer, an empty value is cleared, and any other non-integer is removed
+/// (the field then reads as absent). For each `list_field`: a non-sequence value is removed. Returns
+/// a human-readable warning for every field that was dropped (coercion and clearing are silent).
+pub fn sanitize_typed_fields(
+    map: &mut serde_yaml::Mapping,
+    int_fields: &[&str],
+    list_fields: &[&str],
+) -> Vec<String> {
+    use serde_yaml::Value;
+    let mut warnings = Vec::new();
+    for &f in int_fields {
+        let Some(v) = map.get(f).cloned() else { continue };
+        match v {
+            Value::Null => {}
+            Value::Number(n) if n.as_i64().is_some() => {}
+            Value::String(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    map.remove(f);
+                } else if let Ok(n) = t.parse::<i64>() {
+                    map.insert(Value::from(f), Value::from(n));
+                } else {
+                    warnings.push(format!("field {f} had non-integer value {s:?}; treated as empty"));
+                    map.remove(f);
+                }
+            }
+            other => {
+                warnings.push(format!("field {f} had non-integer value {other:?}; treated as empty"));
+                map.remove(f);
+            }
+        }
+    }
+    for &f in list_fields {
+        let Some(v) = map.get(f).cloned() else { continue };
+        match v {
+            Value::Null | Value::Sequence(_) => {}
+            Value::String(s) if s.trim().is_empty() => {
+                map.remove(f);
+            }
+            other => {
+                warnings.push(format!("field {f} had non-list value {other:?}; treated as empty"));
+                map.remove(f);
+            }
+        }
+    }
+    warnings
+}
+
 /// The slug for an eligible note filename, or None to skip it.
 /// Skips non-`.md` files and `_`-prefixed files (templates / sidecars like `_jd/`, `_logos/`).
 pub fn note_slug(file_name: &str) -> Option<String> {
@@ -208,6 +299,87 @@ mod tests {
         assert_eq!(note_slug("_template.md"), None);
         assert_eq!(note_slug("notes.txt"), None);
         assert_eq!(note_slug(".md"), None);
+    }
+
+    #[test]
+    fn yaml_scalar_round_trips_special_values_as_strings() {
+        // Every one of these must come back as the EXACT string when spliced into `k: <enc>`.
+        let cases = [
+            "plain",
+            "with: colon",
+            "[brackets]",
+            "{braces}",
+            "#hash",
+            "quote\"inside",
+            "123",        // numeric-looking text must stay a string
+            "true",       // YAML bool keyword must stay a string
+            "null",
+            "  spaced  ", // leading/trailing spaces preserved
+            "- dash",
+            "a,b",
+        ];
+        for v in cases {
+            let enc = yaml_scalar(v).unwrap();
+            assert!(!enc.contains('\n'), "{v:?} produced multi-line {enc:?}");
+            let doc = format!("k: {enc}\n");
+            let m: std::collections::HashMap<String, String> = serde_yaml::from_str(&doc)
+                .unwrap_or_else(|e| panic!("value {v:?} encoded as {enc:?} did not parse: {e}"));
+            assert_eq!(m.get("k").map(String::as_str), Some(v), "round-trip failed (enc {enc:?})");
+        }
+        assert!(yaml_scalar("has\nnewline").is_err());
+    }
+
+    #[test]
+    fn yaml_flow_seq_round_trips_lists_with_special_items() {
+        let cases: Vec<Vec<String>> = vec![
+            vec!["rust".into(), "go".into()],
+            vec!["a, b".into(), "c: d".into(), "[x]".into(), "quote\"".into()],
+            vec![],
+            vec!["distributed systems".into()],
+        ];
+        for items in &cases {
+            let enc = yaml_flow_seq(items).unwrap();
+            assert!(!enc.contains('\n'), "{items:?} produced multi-line {enc:?}");
+            let doc = format!("k: {enc}\n");
+            let m: std::collections::HashMap<String, Vec<String>> = serde_yaml::from_str(&doc)
+                .unwrap_or_else(|e| panic!("{items:?} encoded as {enc:?} did not parse: {e}"));
+            assert_eq!(m.get("k"), Some(items), "round-trip failed (enc {enc:?})");
+        }
+    }
+
+    #[test]
+    fn sanitize_typed_fields_drops_bad_values_and_coerces_numeric_strings() {
+        #[derive(serde::Deserialize, Debug, Default, PartialEq)]
+        struct T {
+            comp_low: Option<i64>,
+            comp_high: Option<i64>,
+            yoe_min: Option<i64>,
+            #[serde(default)]
+            required_skills: Vec<String>,
+            #[serde(default)]
+            preferred_skills: Vec<String>,
+            title: Option<String>,
+        }
+        let yaml = "comp_low: abc\ncomp_high: \"200000\"\nyoe_min: 5\nrequired_skills: rust\npreferred_skills:\n  - k8s\ntitle: Engineer\n";
+        let mut v: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let warnings = match &mut v {
+            serde_yaml::Value::Mapping(m) => sanitize_typed_fields(
+                m,
+                &["comp_low", "comp_high", "yoe_min"],
+                &["required_skills", "preferred_skills"],
+            ),
+            _ => panic!("expected mapping"),
+        };
+        let t: T = serde_yaml::from_value(v).unwrap();
+        assert_eq!(t.comp_low, None); // "abc" dropped
+        assert_eq!(t.comp_high, Some(200000)); // "200000" coerced
+        assert_eq!(t.yoe_min, Some(5)); // valid int kept
+        assert!(t.required_skills.is_empty()); // scalar-where-list dropped
+        assert_eq!(t.preferred_skills, vec!["k8s".to_string()]); // valid list kept
+        assert_eq!(t.title.as_deref(), Some("Engineer")); // text untouched
+        assert_eq!(warnings.len(), 2, "warnings: {warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("comp_low")));
+        assert!(warnings.iter().any(|w| w.contains("required_skills")));
     }
 
     #[test]

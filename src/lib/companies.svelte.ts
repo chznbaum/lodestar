@@ -1,6 +1,7 @@
 import {
   listCompanies,
   updateCompanyField,
+  setCompanyListField,
   setCompanyNotes,
   setCompanyStatus,
   createCompany,
@@ -74,6 +75,9 @@ export const companiesStore = {
   },
   async updateField(slug: string, key: string, value: string) {
     apply(await updateCompanyField(vaultPath!, slug, key, value));
+  },
+  async setListField(slug: string, key: string, values: string[]) {
+    apply(await setCompanyListField(vaultPath!, slug, key, values));
   },
   async create(nc: NewCompany): Promise<Company> {
     const c = await createCompany(vaultPath!, nc);

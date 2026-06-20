@@ -50,7 +50,8 @@ export function createCompany(vaultPath: string, company: NewCompany): Promise<C
   return invoke<Company>("create_company", { vaultPath, company });
 }
 
-/** Write a single frontmatter field on a company note; returns the re-parsed record. */
+/** Write a single scalar frontmatter field on a company note; returns the re-parsed record.
+ *  List fields (domain, business_model) must use {@link setCompanyListField}. */
 export function updateCompanyField(
   vaultPath: string,
   slug: string,
@@ -58,6 +59,17 @@ export function updateCompanyField(
   value: string,
 ): Promise<Company> {
   return invoke<Company>("update_company_field", { vaultPath, slug, key, value });
+}
+
+/** Write a list-typed frontmatter field (domain, business_model) as a typed string array;
+ *  the backend encodes it safely. Returns the re-parsed record. */
+export function setCompanyListField(
+  vaultPath: string,
+  slug: string,
+  key: string,
+  values: string[],
+): Promise<Company> {
+  return invoke<Company>("set_company_list_field", { vaultPath, slug, key, values });
 }
 
 /** Replace a company note's body; returns the re-parsed record. */

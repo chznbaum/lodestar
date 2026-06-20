@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 pub const STATUSES: &[&str] = &["active", "paused", "exhausted", "removed"];
 
+/// List-typed frontmatter fields — set via `set_company_list_field`, never the scalar writer.
+const LIST_FIELDS: &[&str] = &["domain", "business_model"];
+
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Company {
     pub slug: String,
@@ -108,6 +111,28 @@ pub fn validate_status(status: &str) -> Result<(), String> {
     }
 }
 
+/// Deserialize the frontmatter strictly; on failure, sanitize the list fields so a single
+/// malformed value (e.g. a scalar where a list is expected) degrades to empty (with a logged
+/// warning) and retry — one bad field never makes the whole note vanish. A still-unparseable note
+/// returns the original error.
+fn parse_front_lenient(slug: &str, fm: &str) -> Result<Front, String> {
+    let orig = match serde_yaml::from_str::<Front>(fm) {
+        Ok(f) => return Ok(f),
+        Err(e) => e,
+    };
+    let mut value: serde_yaml::Value =
+        serde_yaml::from_str(fm).map_err(|_| format!("{slug}: {orig}"))?;
+    let serde_yaml::Value::Mapping(map) = &mut value else {
+        return Err(format!("{slug}: {orig}"));
+    };
+    let warnings = note::sanitize_typed_fields(map, &[], LIST_FIELDS);
+    let f = serde_yaml::from_value::<Front>(value).map_err(|_| format!("{slug}: {orig}"))?;
+    for w in &warnings {
+        eprintln!("{slug}: {w}");
+    }
+    Ok(f)
+}
+
 pub fn parse_company(
     slug: &str,
     text: &str,
@@ -115,7 +140,7 @@ pub fn parse_company(
     screen: &HashMap<String, String>,
 ) -> Result<Company, String> {
     let (fm, body) = split_frontmatter(text);
-    let f: Front = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
+    let f: Front = parse_front_lenient(slug, fm)?;
     let last_checked = f.last_checked.filter(|s| !s.trim().is_empty());
     let due_for_check = is_due(f.status.as_deref(), last_checked.as_deref(), today);
     let screening = screening_for(&f.domain, screen);
@@ -230,9 +255,41 @@ pub fn update_company_field(
     if key == "id" {
         return Err("refusing to modify the identity field `id`".into());
     }
+    if LIST_FIELDS.contains(&key.as_str()) {
+        return Err(format!("{key} is a list field; use set_company_list_field"));
+    }
+    // YAML-safe-encode arbitrary (e.g. LLM-produced) text so colons/quotes/brackets can't corrupt
+    // the note. Empty clears the field (`key:` → null).
+    let fragment = if value.is_empty() {
+        String::new()
+    } else {
+        note::yaml_scalar(&value)?
+    };
     let p = company_path(&vault_path, &slug)?;
     let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
-    let updated = set_frontmatter_field(&text, &key, &value)?;
+    let updated = set_frontmatter_field(&text, &key, &fragment)?;
+    note::write_note(&p, &updated)?;
+    let screen = crate::domain::screening_map(&vault_path);
+    parse_company(&slug, &updated, Local::now().date_naive(), &screen)
+}
+
+/// Set a list-typed company field (domain/business_model) to `values`, written as a YAML-safe flow
+/// sequence so items with commas/colons/quotes round-trip exactly. Rejects non-list fields. An
+/// empty `values` writes `[]` (clears the list).
+#[tauri::command]
+pub fn set_company_list_field(
+    vault_path: String,
+    slug: String,
+    key: String,
+    values: Vec<String>,
+) -> Result<Company, String> {
+    if !LIST_FIELDS.contains(&key.as_str()) {
+        return Err(format!("{key} is not a list field"));
+    }
+    let fragment = note::yaml_flow_seq(&values)?;
+    let p = company_path(&vault_path, &slug)?;
+    let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
+    let updated = set_frontmatter_field(&text, &key, &fragment)?;
     note::write_note(&p, &updated)?;
     let screen = crate::domain::screening_map(&vault_path);
     parse_company(&slug, &updated, Local::now().date_naive(), &screen)
@@ -442,6 +499,61 @@ mod tests {
         // errors on the id guard before any filesystem access
         let r = update_company_field("/vault".into(), "stripe".into(), "id".into(), "x".into());
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn update_company_field_safely_encodes_text_and_rejects_lists() {
+        let dir = std::env::temp_dir().join(format!("lodestar-cofield-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\ndomain: [fintech]\nstatus: active\nlast_checked:\n---\n\n## Notes\n\nx\n",
+        )
+        .unwrap();
+        // Free text with YAML-special chars round-trips exactly (the corruption case).
+        let tricky = "remote: US/EU; \"flexible\" [see careers]";
+        let c = update_company_field(vault.clone(), "acme".into(), "location".into(), tricky.into()).unwrap();
+        assert_eq!(c.location.as_deref(), Some(tricky));
+        let reread = parse_company(
+            "acme",
+            &std::fs::read_to_string(dir.join("companies/acme.md")).unwrap(),
+            d("2026-06-15"),
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(reread.location.as_deref(), Some(tricky));
+        // A list field can't be written through the scalar setter.
+        assert!(update_company_field(vault.clone(), "acme".into(), "domain".into(), "fintech".into()).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_company_list_field_round_trips_and_rejects_scalar_fields() {
+        let dir = std::env::temp_dir().join(format!("lodestar-colist-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\ndomain: [fintech]\nbusiness_model: [b2b]\nstatus: active\nlast_checked:\n---\n\n## Notes\n\nx\n",
+        )
+        .unwrap();
+        let domains = vec!["fintech".to_string(), "ai, ml".to_string()];
+        let c = set_company_list_field(vault.clone(), "acme".into(), "domain".into(), domains.clone()).unwrap();
+        assert_eq!(c.domain, domains);
+        // A non-list field is rejected.
+        assert!(set_company_list_field(vault.clone(), "acme".into(), "name".into(), vec!["x".into()]).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parse_company_degrades_bad_list_field_instead_of_failing() {
+        // domain is a scalar (not a list): degrade to empty, note still loads.
+        let text = "---\nid: x\nname: X\ndomain: fintech\nstatus: active\n---\n\nbody\n";
+        let c = parse_company("x", text, d("2026-06-15"), &HashMap::new()).unwrap();
+        assert!(c.domain.is_empty());
+        assert_eq!(c.name, "X");
+        assert_eq!(c.status.as_deref(), Some("active"));
     }
 
     #[test]

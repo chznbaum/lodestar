@@ -55,41 +55,33 @@
     editingDetails = false;
   }
 
-  function fmtList(raw: string): string {
-    const arr = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    return "[" + arr.join(", ") + "]";
+  function splitList(s: string): string[] {
+    return s.split(",").map((x) => x.trim()).filter(Boolean);
   }
 
-  function currentFmtList(arr: string[]): string {
-    return "[" + arr.join(", ") + "]";
+  function sameList(a: string[], b: string[]): boolean {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
   }
 
   async function saveDetails() {
     const c = company;
     if (!c) return;
-    const writes: Array<[string, string]> = [];
 
-    // domain — from the validated picker (string[])
-    if (currentFmtList(domainDraft) !== currentFmtList(c.domain)) {
-      writes.push(["domain", currentFmtList(domainDraft)]);
+    // List fields go through the typed list command — the backend encodes them safely.
+    if (!sameList(domainDraft, c.domain)) {
+      await cs.setListField(c.slug, "domain", domainDraft);
+    }
+    const bm = splitList(detailDraft.business_model ?? "");
+    if (!sameList(bm, c.business_model)) {
+      await cs.setListField(c.slug, "business_model", bm);
     }
 
-    // business_model — free-text list field
-    const bmFormatted = fmtList(detailDraft.business_model ?? "");
-    if (bmFormatted !== currentFmtList(c.business_model)) {
-      writes.push(["business_model", bmFormatted]);
-    }
-
-    // Scalar fields
+    // Scalar fields.
     const scalarKeys = ["company_size", "stage", "remote_policy", "location", "website", "careers_url", "domain_raw", "source"] as const;
     for (const key of scalarKeys) {
       const draftVal = detailDraft[key] ?? "";
       const currentVal = (c[key] ?? "") as string;
-      if (draftVal !== currentVal) writes.push([key, draftVal]);
-    }
-
-    for (const [key, value] of writes) {
-      await cs.updateField(c.slug, key, value);
+      if (draftVal !== currentVal) await cs.updateField(c.slug, key, draftVal);
     }
     editingDetails = false;
   }

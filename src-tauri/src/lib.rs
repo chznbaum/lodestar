@@ -38,6 +38,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             company::list_companies,
             company::update_company_field,
+            company::set_company_list_field,
             company::set_company_notes,
             company::create_company,
             company::set_company_status,
