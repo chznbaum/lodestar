@@ -45,14 +45,17 @@ pub(crate) fn record_step(
     Ok(step)
 }
 
-/// Execute the `careers-scrape` stage: scrape `url`, record an `ok`/`failed` step (cost =
-/// the ScrapingBee credits charged), and return the scraped content for sanitization. On
+/// Execute a scrape stage: scrape `url`, record an `ok`/`failed` step (cost = the
+/// ScrapingBee credits charged), and return the scraped content for sanitization. On
 /// scraper failure, records a `failed` step and propagates the `ScrapeError`.
+/// `stage` is the queue stage name (e.g. `"careers-scrape"` or `"jd-scrape"`) so that
+/// the recorded step row carries the correct stage label.
 pub fn run_scrape_step<S: Scraper>(
     vault_path: &str,
     run_id: &str,
     url: &str,
     target: &str,
+    stage: &str,
     tier: ProxyTier,
     scraper: &S,
 ) -> Result<ScrapeResult, ScrapeError> {
@@ -60,7 +63,7 @@ pub fn run_scrape_step<S: Scraper>(
     match scraper.fetch(url, tier) {
         Ok(result) => {
             let cost = result.credits.map(|c| c as i64);
-            record_step(vault_path, run_id, "careers-scrape", "scrape", target, started, "ok", None, cost)
+            record_step(vault_path, run_id, stage, "scrape", target, started, "ok", None, cost)
                 .map_err(|e| ScrapeError {
                     status: None,
                     body: e,
@@ -70,7 +73,7 @@ pub fn run_scrape_step<S: Scraper>(
         }
         Err(e) => {
             record_step(
-                vault_path, run_id, "careers-scrape", "scrape", target, started, "failed",
+                vault_path, run_id, stage, "scrape", target, started, "failed",
                 Some(e.to_string()), None,
             )
             .map_err(|re| ScrapeError {
@@ -117,7 +120,7 @@ mod tests {
         let scraper = FakeScraper { content: "<p>x</p>".into(), credits: 5 };
         let result = run_scrape_step(
             &vault, "2026-06-17-0001", "https://stripe.com/careers", "stripe",
-            ProxyTier::Premium, &scraper,
+            "careers-scrape", ProxyTier::Premium, &scraper,
         )
         .unwrap();
         assert_eq!(result.content, "<p>x</p>"); // content flows to the next stage
@@ -149,7 +152,7 @@ mod tests {
         }
         let err = run_scrape_step(
             &vault, "2026-06-17-0001", "https://x", "stripe",
-            ProxyTier::Premium, &FailScraper,
+            "careers-scrape", ProxyTier::Premium, &FailScraper,
         )
         .unwrap_err();
         assert!(err.to_string().contains("403"));

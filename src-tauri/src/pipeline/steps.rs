@@ -28,13 +28,19 @@
 
 use crate::check::{get_check, write_check, Check};
 use crate::config::{model_for, PipelineConfig};
-use crate::job::{job_slug, list_jobs, write_job_stub, Job};
+use crate::job::{
+    job_slug, list_jobs, parse_job, set_job_list_field, set_job_section, update_job_field,
+    write_job_stub, Job, EMPLOYMENT_TYPES, REMOTE_KINDS, SPONSORSHIP, VALID_LEVELS,
+};
 use crate::llm::Llm;
 use crate::pipeline::filter::{prefilter, RawListing};
 use crate::pipeline::queue::{NewTask, Queue, QueuedTask, MAX_ATTEMPTS, TRANSIENT_SCRAPE_MAX_ATTEMPTS};
 use crate::pipeline::runner::{now_iso, record_step, run_scrape_step};
 use crate::profile::read_target_criteria;
-use crate::prompts::{build_structure_listings_prompt, parse_structured_listings, StructuredListing};
+use crate::prompts::{
+    build_structure_jd_prompt, build_structure_listings_prompt, parse_structured_jd,
+    parse_structured_listings, StructuredJd, StructuredListing,
+};
 use crate::sanitize::sanitize;
 use crate::scraper::{percent_encode_target_url, FailureClass, ProxyTier, Scraper};
 use serde::{Deserialize, Serialize};
@@ -106,6 +112,14 @@ struct FinalizePayload {
     listings: Vec<StructuredListing>,
 }
 
+/// Carries the job slug + sanitized JD text through the `jd-scrape → structure-jd` stages.
+/// `slug` is the durable carrier (mirrors `task.target`, but the payload survives re-enqueue).
+#[derive(Serialize, Deserialize)]
+struct JdStructurePayload {
+    slug: String,
+    sanitized: String,
+}
+
 /// `<today>-NNNN`, sequenced per day over existing `checks/` notes.
 pub fn next_run_id(vault_path: &str, today: &str) -> Result<String, String> {
     let dir = Path::new(vault_path).join("checks");
@@ -169,29 +183,82 @@ pub fn start_discovery(
     Ok(run_id)
 }
 
+/// Open a `checks/` run for the `job_detail` chain and enqueue the first `jd-scrape` task.
+/// Reads `url` and `company` from the job note at `<vault>/jobs/<job_slug>.md`.
+/// Returns the run id.
+pub fn start_job_detail(
+    queue: &dyn Queue,
+    vault_path: &str,
+    job_slug: &str,
+    today: &str,
+) -> Result<String, String> {
+    let path = Path::new(vault_path).join("jobs").join(format!("{job_slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let job = parse_job(job_slug, &text)?;
+    let url = job.url.ok_or_else(|| format!("job {job_slug:?} has no url to scrape"))?;
+    let company = job.company.unwrap_or_default();
+    std::fs::create_dir_all(Path::new(vault_path).join("checks")).map_err(|e| e.to_string())?;
+    let run_id = next_run_id(vault_path, today)?;
+    let run = Check {
+        slug: run_id.clone(),
+        kind: "job_detail".into(),
+        trigger: "manual".into(),
+        status: "running".into(),
+        started_at: Some(now_iso()),
+        finished_at: None,
+        duration: None,
+        companies: if company.is_empty() { vec![] } else { vec![company] },
+        roles_found: 0,
+        errors: 0,
+        steps: vec![],
+    };
+    write_check(vault_path, &run)?;
+    let payload = serde_json::to_string(&ScrapePayload {
+        careers_url: url,
+        tier: default_tier(),
+        encoding_fixed: false,
+    })
+    .map_err(|e| e.to_string())?;
+    queue.enqueue(NewTask {
+        run_id: run_id.clone(),
+        stage: "jd-scrape".into(),
+        class: "scrape".into(),
+        target: job_slug.into(),
+        payload,
+    })?;
+    Ok(run_id)
+}
+
 /// Mark a run as `failed` with a human-readable error. The scrape step row was already
 /// written by `run_scrape_step`; here we ONLY annotate its `error` field with the friendly
 /// reason (no second append). A single `write_check` persists everything.
+///
+/// `stage` is the queue stage name of the failing scrape step (e.g. `"careers-scrape"` or
+/// `"jd-scrape"`); used to locate the failed step row and, if absent, to synthesize one.
+///
+/// `stamp_checked` is only called for `job_check` runs (where `target` is a company slug).
+/// For `job_detail` runs `target` is a job slug — stamping would corrupt a company note.
 fn fail_run(
     vault_path: &str,
     run_id: &str,
-    company: &str,
+    target: &str,
+    stage: &str,
     error_msg: &str,
     sink: &dyn EventSink,
 ) {
     if let Ok(mut run) = get_check(vault_path.to_string(), run_id.to_string()) {
-        // Find the last failed careers-scrape step (written by run_scrape_step) and annotate
+        // Find the last failed step for this stage (written by run_scrape_step) and annotate
         // it with the human-readable reason. If none exists (defensive), append one in-memory
         // rather than writing a second disk record.
         if let Some(step) = run.steps.iter_mut()
-            .rfind(|s| s.stage == "careers-scrape" && s.status == "failed")
+            .rfind(|s| s.stage == stage && s.status == "failed")
         {
             step.error = Some(error_msg.to_string());
         } else {
             run.steps.push(crate::check::Step {
-                stage: "careers-scrape".to_string(),
+                stage: stage.to_string(),
                 class: "scrape".to_string(),
-                target: company.to_string(),
+                target: target.to_string(),
                 status: "failed".to_string(),
                 attempts: 1,
                 started_at: Some(now_iso()),
@@ -203,10 +270,16 @@ fn fail_run(
         run.status = "failed".into();
         run.errors += 1;
         run.finished_at = Some(now_iso());
+        // Only stamp last_checked on job_check runs (target is a company slug).
+        let kind = run.kind.clone();
         let _ = write_check(vault_path, &run);
+        if kind == "job_check" {
+            let today = run_id.get(..10).unwrap_or(run_id);
+            stamp_checked(vault_path, target, today);
+        }
     }
-    let today = run_id.get(..10).unwrap_or(run_id);
-    stamp_checked(vault_path, company, today);
+    // NOTE: if get_check fails we cannot determine the run kind, so we do NOT stamp.
+    // Corruption of a job note (wrong kind stamped as a company) is worse than missing a stamp.
     eprintln!("run {run_id} failed: {error_msg}");
     sink.run_finished(run_id, "failed");
 }
@@ -246,26 +319,58 @@ pub fn pump_once<S: Scraper, L: Llm>(
 
     // Notify the UI that this stage is now executing — emitted before dispatch so the UI can
     // display the live current-phase label immediately.
-    // For careers-scrape we decode the payload to pass the proxy tier as `detail`.
-    if task.stage == "careers-scrape" {
+    // For scrape stages, decode the payload to pass the proxy tier as `detail`.
+    if task.stage == "careers-scrape" || task.stage == "jd-scrape" {
         // --- Scrape stage: typed failure + per-class retry policy ---
         let p: ScrapePayload = serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
         let scrape_detail = if p.tier == "stealth" { Some("stealth") } else { None };
         sink.step_started(&task.run_id, &task.stage, scrape_detail);
         let tier = p.proxy_tier();
-        match run_scrape_step(vault_path, &task.run_id, &p.careers_url, &task.target, tier, scraper) {
+        match run_scrape_step(vault_path, &task.run_id, &p.careers_url, &task.target, &task.stage, tier, scraper) {
             Ok(scraped) => {
-                // Success: sanitize and enqueue structure-listings
                 let started = now_iso();
                 let sanitized = sanitize(&scraped.content, &p.careers_url);
                 record_step(vault_path, &task.run_id, "sanitize", "script", &task.target, started, "ok", None, None)?;
+
+                // For jd-scrape: write the raw JD to jobs/_jd/<slug>.md and set jd_raw_file.
+                if task.stage == "jd-scrape" {
+                    let jd_dir = Path::new(vault_path).join("jobs").join("_jd");
+                    std::fs::create_dir_all(&jd_dir).map_err(|e| e.to_string())?;
+                    let jd_raw_path = jd_dir.join(format!("{}.md", task.target));
+                    crate::note::write_note(&jd_raw_path, &scraped.content)
+                        .map_err(|e| format!("write jd_raw_file: {e}"))?;
+                    let rel_path = format!("jobs/_jd/{}.md", task.target);
+                    update_job_field(
+                        vault_path.to_string(),
+                        task.target.clone(),
+                        "jd_raw_file".into(),
+                        rel_path,
+                    )?;
+                }
+
+                // Choose the successor stage based on which scrape just ran.
+                let (succ_stage, succ_payload) = if task.stage == "jd-scrape" {
+                    (
+                        "structure-jd",
+                        serde_json::to_string(&JdStructurePayload {
+                            slug: task.target.clone(),
+                            sanitized,
+                        })
+                        .map_err(|e| e.to_string())?,
+                    )
+                } else {
+                    (
+                        "structure-listings",
+                        serde_json::to_string(&StructurePayload { sanitized })
+                            .map_err(|e| e.to_string())?,
+                    )
+                };
                 queue.enqueue(NewTask {
                     run_id: task.run_id.clone(),
-                    stage: "structure-listings".into(),
+                    stage: succ_stage.into(),
                     class: "llm".into(),
                     target: task.target.clone(),
-                    payload: serde_json::to_string(&StructurePayload { sanitized })
-                        .map_err(|e| e.to_string())?,
+                    payload: succ_payload,
                 })?;
                 queue.complete(task.id)?;
                 sink.step_done(&task.run_id, &task.stage, "ok");
@@ -294,14 +399,14 @@ pub fn pump_once<S: Scraper, L: Llm>(
                             }
                         };
                         queue.kill(task.id, &reason)?;
-                        fail_run(vault_path, &task.run_id, &task.target, &reason, sink);
+                        fail_run(vault_path, &task.run_id, &task.target, &task.stage, &reason, sink);
                     }
                     FailureClass::FixEncoding => {
                         if p.encoding_fixed {
                             // Already re-issued with encoded URL — still failing. Give up.
                             let reason = "url encoding fix did not resolve the error";
                             queue.kill(task.id, reason)?;
-                            fail_run(vault_path, &task.run_id, &task.target, reason, sink);
+                            fail_run(vault_path, &task.run_id, &task.target, &task.stage, reason, sink);
                         } else {
                             // Re-issue once with RFC-3986-percent-encoded URL.
                             let fixed_url = percent_encode_target_url(&p.careers_url);
@@ -314,7 +419,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
                             queue.kill(task.id, "re-issuing with encoded url")?;
                             queue.enqueue(NewTask {
                                 run_id: task.run_id.clone(),
-                                stage: "careers-scrape".into(),
+                                stage: task.stage.clone(), // re-enqueue as the SAME stage
                                 class: "scrape".into(),
                                 target: task.target.clone(),
                                 payload: new_payload,
@@ -326,7 +431,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
                             // Already escalated to Stealth — still blocked. Give up.
                             let reason = "blocked — escalated to stealth, still failed";
                             queue.kill(task.id, reason)?;
-                            fail_run(vault_path, &task.run_id, &task.target, reason, sink);
+                            fail_run(vault_path, &task.run_id, &task.target, &task.stage, reason, sink);
                         } else {
                             // Re-enqueue once with Stealth tier.
                             let new_payload = serde_json::to_string(&ScrapePayload {
@@ -338,7 +443,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
                             queue.kill(task.id, "escalating to stealth proxy")?;
                             queue.enqueue(NewTask {
                                 run_id: task.run_id.clone(),
-                                stage: "careers-scrape".into(),
+                                stage: task.stage.clone(), // re-enqueue as the SAME stage
                                 class: "scrape".into(),
                                 target: task.target.clone(),
                                 payload: new_payload,
@@ -351,7 +456,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
                         if task.attempts >= TRANSIENT_SCRAPE_MAX_ATTEMPTS {
                             queue.kill(task.id, &err_str)?;
                             fail_run(
-                                vault_path, &task.run_id, &task.target,
+                                vault_path, &task.run_id, &task.target, &task.stage,
                                 &format!("transient scrape error after {TRANSIENT_SCRAPE_MAX_ATTEMPTS} attempts: {err_str}"),
                                 sink,
                             );
@@ -374,7 +479,8 @@ pub fn pump_once<S: Scraper, L: Llm>(
             }
             queue.complete(task.id)?;
             sink.step_done(&task.run_id, &task.stage, "ok");
-            if task.stage == "finalize" {
+            // Emit run-complete for both terminal stages of their respective chains.
+            if matches!(task.stage.as_str(), "finalize" | "alignment") {
                 sink.run_finished(&task.run_id, "complete");
             }
         }
@@ -390,11 +496,14 @@ pub fn pump_once<S: Scraper, L: Llm>(
                     run.errors += 1;
                     run.finished_at = Some(now_iso());
                     let _ = write_check(vault_path, &run);
+                    // Only stamp last_checked for job_check runs (target is a company slug).
+                    // For job_detail runs, target is a job slug — stamping would corrupt/create
+                    // a wrong company note.
+                    if run.kind == "job_check" {
+                        let today = task.run_id.get(..10).unwrap_or(&task.run_id);
+                        stamp_checked(vault_path, &task.target, today);
+                    }
                 }
-                // stamp_checked and run_finished fire UNCONDITIONALLY — consistent with fail_run().
-                // Even if get_check fails above, we must not leave the run stuck in "running".
-                let today = task.run_id.get(..10).unwrap_or(&task.run_id);
-                stamp_checked(vault_path, &task.target, today);
                 sink.run_finished(&task.run_id, "failed");
             }
         }
@@ -528,8 +637,117 @@ fn dispatch_non_scrape<L: Llm>(
             stamp_checked(vault_path, company, today);
             Ok(vec![])
         }
+        "structure-jd" => {
+            let p: JdStructurePayload =
+                serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
+            let started = now_iso();
+            let prompt = build_structure_jd_prompt(&model_for(cfg, "structure-jd"), &p.sanitized);
+            let resp = llm.complete(&prompt);
+            let (jd, cost) = match resp {
+                Ok(r) => match parse_structured_jd(&r.content) {
+                    Ok(jd) => (jd, r.cost_micro_usd),
+                    Err(e) => {
+                        record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "failed", Some(e.clone()), r.cost_micro_usd)?;
+                        return Err(e);
+                    }
+                },
+                Err(e) => {
+                    record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "failed", Some(e.clone()), None)?;
+                    return Err(e);
+                }
+            };
+            write_jd_fields(vault_path, &p.slug, &jd)?;
+            record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "ok", None, cost)?;
+            Ok(vec![NewTask {
+                run_id: run_id.into(),
+                stage: "gap-detect".into(),
+                class: "script".into(),
+                target: p.slug,
+                payload: "{}".into(),
+            }])
+        }
         other => Err(format!("unknown stage: {other}")),
     }
+}
+
+/// Write structured JD fields to the job note. For each populated scalar field, calls
+/// `update_job_field` (which validates enum values). Enum-constrained fields are pre-validated
+/// against their constant sets; invalid values are skipped with a warning so that one stray
+/// LLM output value doesn't fail the entire stage. List fields use `set_job_list_field`.
+/// Assembles and writes the candidate-brief `## JD — structured` body section.
+fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<(), String> {
+    // Helper: write a scalar field, propagating real IO errors but skipping invalid enum values.
+    let write_scalar = |field: &str, value: &str| -> Result<(), String> {
+        update_job_field(vault_path.to_string(), slug.to_string(), field.into(), value.into())
+    };
+
+    // Enum-constrained fields: pre-validate, skip + warn on bad value, propagate IO errors.
+    macro_rules! write_enum {
+        ($field:expr, $value:expr, $allowed:expr) => {
+            if let Some(v) = $value.as_deref() {
+                if $allowed.contains(&v) {
+                    write_scalar($field, v)?;
+                } else {
+                    eprintln!("structure-jd: invalid {field:?} value {v:?} (skipped)", field = $field);
+                }
+            }
+        };
+    }
+
+    write_enum!("remote", &jd.remote, REMOTE_KINDS);
+    write_enum!("employment_type", &jd.employment_type, EMPLOYMENT_TYPES);
+    write_enum!("visa_sponsorship", &jd.visa_sponsorship, SPONSORSHIP);
+    write_enum!("relocation", &jd.relocation, SPONSORSHIP);
+    write_enum!("level", &jd.level, VALID_LEVELS);
+
+    // Free-text scalar fields.
+    if let Some(v) = jd.comp_low { write_scalar("comp_low", &v.to_string())?; }
+    if let Some(v) = jd.comp_high { write_scalar("comp_high", &v.to_string())?; }
+    if let Some(v) = jd.comp_currency.as_deref() { write_scalar("comp_currency", v)?; }
+    if let Some(v) = jd.comp_period.as_deref() { write_scalar("comp_period", v)?; }
+    if let Some(v) = jd.comp_equity.as_deref() { write_scalar("comp_equity", v)?; }
+    if let Some(v) = jd.yoe_min { write_scalar("yoe_min", &v.to_string())?; }
+    if let Some(v) = jd.yoe_max { write_scalar("yoe_max", &v.to_string())?; }
+    if let Some(v) = jd.reports_to.as_deref() { write_scalar("reports_to", v)?; }
+    if let Some(v) = jd.team.as_deref() { write_scalar("team", v)?; }
+    if let Some(v) = jd.location_constraints.as_deref() { write_scalar("location_constraints", v)?; }
+    if let Some(v) = jd.application_url.as_deref() { write_scalar("application_url", v)?; }
+    if let Some(v) = jd.date_posted.as_deref() { write_scalar("date_posted", v)?; }
+
+    // List fields.
+    if !jd.tech_stack.is_empty() {
+        set_job_list_field(vault_path.to_string(), slug.to_string(), "tech_stack".into(), jd.tech_stack.clone())?;
+    }
+    if !jd.required_skills.is_empty() {
+        set_job_list_field(vault_path.to_string(), slug.to_string(), "required_skills".into(), jd.required_skills.clone())?;
+    }
+    if !jd.preferred_skills.is_empty() {
+        set_job_list_field(vault_path.to_string(), slug.to_string(), "preferred_skills".into(), jd.preferred_skills.clone())?;
+    }
+
+    // Candidate-brief body section.
+    let mut brief_parts: Vec<String> = Vec::new();
+    if let Some(v) = jd.role_brief.as_deref() {
+        brief_parts.push(v.to_string());
+    }
+    if let Some(v) = jd.must_haves.as_deref() {
+        brief_parts.push(format!("**Must-haves:** {v}"));
+    }
+    if let Some(v) = jd.nice_to_haves.as_deref() {
+        brief_parts.push(format!("**Nice-to-haves:** {v}"));
+    }
+    if let Some(v) = jd.signals.as_deref() {
+        brief_parts.push(format!("**Signals:** {v}"));
+    }
+    if let Some(v) = jd.open_questions.as_deref() {
+        brief_parts.push(format!("**Open questions:** {v}"));
+    }
+    if !brief_parts.is_empty() {
+        let brief = brief_parts.join("\n\n");
+        set_job_section(vault_path, slug, "## JD — structured", &brief)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -852,6 +1070,71 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    // ── job_detail chain tests ────────────────────────────────────────────────────────────────────
+
+    /// Write a minimal job-detail fixture vault with one job stub (url + company) and a
+    /// target_criteria profile. Returns the temp dir (caller must remove_dir_all).
+    fn job_detail_fixture_vault() -> std::path::PathBuf {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir()
+            .join(format!("lodestar-jd-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        std::fs::create_dir_all(dir.join("profile")).unwrap();
+        // Minimal job stub with url + company so start_job_detail can resolve both.
+        std::fs::write(
+            dir.join("jobs/senior-engineer-acme.md"),
+            "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/1\nstatus: new\n---\n",
+        ).unwrap();
+        std::fs::write(
+            dir.join("profile/target_criteria.md"),
+            "---\ntype: target_criteria\nwork_arrangements: [remote]\nmatch_titles:\n  - engineer\n---\n",
+        ).unwrap();
+        dir
+    }
+
+    #[test]
+    fn job_detail_structure_jd_writes_fields_from_fake_llm() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        // Arrange: a vault with one job stub (has url + company), a target_criteria, fakes.
+        let dir = job_detail_fixture_vault();
+        let vault = dir.to_str().unwrap();
+        let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-19").unwrap();
+
+        let scraper = FakeScraper { content: "<p>JD</p>".into(), credits: 5 };
+        let llm = FakeLlm {
+            // structure-jd returns a JSON object
+            reply: r#"{"comp_low":180000,"comp_high":220000,"comp_currency":"USD","comp_period":"annual",
+              "required_skills":["rust"],"preferred_skills":["kubernetes"],"remote":"remote",
+              "role_brief":"Build platform.","must_haves":"5y","nice_to_haves":"k8s","signals":"early","open_questions":"on-call?"}"#.into(),
+            cost_micro_usd: 1000,
+        };
+        let cfg = default_config();
+        let sink = NoopSink;
+        let never = |_: &str| false;
+        // Pump: jd-scrape (scrape+sanitize) then structure-jd. Gap-detect is not yet implemented,
+        // so dispatch_non_scrape returns "unknown stage: gap-detect" and the loop terminates.
+        while pump_once(&queue, vault, &cfg, &scraper, &llm, &sink, &never).unwrap() {}
+
+        let j = crate::job::parse_job("senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap()).unwrap();
+        assert_eq!(j.comp_low, Some(180000));
+        assert_eq!(j.required_skills, vec!["rust"]);
+        assert_eq!(j.remote.as_deref(), Some("remote"));
+        let body = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
+        assert!(body.contains("## JD — structured") && body.contains("Build platform."),
+            "expected '## JD — structured' and 'Build platform.' in note:\n{body}");
+        // The raw JD file must be written.
+        assert!(dir.join("jobs/_jd/senior-engineer-acme.md").exists(),
+            "jd_raw_file must be written at jobs/_jd/senior-engineer-acme.md");
+        // run_id must be a valid run id string.
+        assert!(!run_id.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// After a terminal-failure drain `last_checked` is ALSO stamped on the target company note.
     #[test]
     fn terminal_failure_stamps_last_checked() {
@@ -920,8 +1203,8 @@ mod tests {
         }
     }
 
-    /// When the LLM stage exhausts MAX_ATTEMPTS, `last_checked` must be stamped on the target
-    /// company note and the run must be marked `failed` — even if get_check were to fail.
+    /// When the LLM stage exhausts MAX_ATTEMPTS on a `job_check` run, `last_checked` is stamped
+    /// on the target company note (when `get_check` succeeds) and the run is marked `failed`.
     #[test]
     fn llm_exhausted_stamps_last_checked() {
         let (dir, vault) = setup_vault();
@@ -948,6 +1231,47 @@ mod tests {
         assert!(
             company_text.contains("last_checked: 2026-06-19"),
             "LLM-exhausted run must stamp last_checked; got:\n{company_text}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `job_detail` run that exhausts MAX_ATTEMPTS at the LLM stage must NOT stamp
+    /// `last_checked` on any company note, and must NOT create a spurious note at
+    /// `companies/<job-slug>.md` (the bug that would result if the kind-gate were absent).
+    #[test]
+    fn job_detail_terminal_failure_does_not_stamp_company() {
+        use crate::scraper::tests::FakeScraper;
+
+        // Arrange: vault with a job stub (url + company) and a real company note.
+        let dir = job_detail_fixture_vault();
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\nstatus: active\n---\n",
+        ).unwrap();
+        let vault = dir.to_str().unwrap();
+        let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-20").unwrap();
+
+        // Scraper succeeds (so we reach the LLM stage), LLM always fails (exhausts MAX_ATTEMPTS).
+        let scraper = FakeScraper { content: "<p>JD content</p>".into(), credits: 5 };
+        let llm = AlwaysFailLlm;
+        drain(&queue, vault, &scraper, &llm);
+
+        // Run must end as failed (not stuck in running).
+        let run = get_check(vault.to_string(), run_id.clone()).unwrap();
+        assert_eq!(run.status, "failed", "LLM-exhausted job_detail run must be marked failed; got {:?}", run.status);
+
+        // The kind-gate must hold: acme.md must have NO last_checked field.
+        let company_text = std::fs::read_to_string(dir.join("companies/acme.md")).unwrap();
+        assert!(
+            !company_text.contains("last_checked"),
+            "job_detail run must NOT stamp last_checked on company note; got:\n{company_text}"
+        );
+        // No spurious companies/<job-slug>.md note must have been created.
+        assert!(
+            !dir.join("companies/senior-engineer-acme.md").exists(),
+            "job_detail run must NOT create a company note named after the job slug"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
