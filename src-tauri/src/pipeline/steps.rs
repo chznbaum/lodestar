@@ -552,7 +552,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("profile")).unwrap();
         std::fs::write(
             dir.join("profile/target_criteria.md"),
-            "---\ntype: target_criteria\nlocation_requirement: remote_only\nmatch_titles:\n  - engineer\n---\n",
+            "---\ntype: target_criteria\nwork_arrangements: [remote]\nmatch_titles:\n  - engineer\n---\n",
         )
         .unwrap();
         let vault = dir.to_str().unwrap().to_string();
@@ -801,7 +801,7 @@ mod tests {
         // Actually, to test level validation specifically, use a profile that matches both.
         std::fs::write(
             dir.join("profile/target_criteria.md"),
-            "---\ntype: target_criteria\nlocation_requirement: remote_only\nmatch_titles:\n  - engineer\n  - wizard\n---\n",
+            "---\ntype: target_criteria\nwork_arrangements: [remote]\nmatch_titles:\n  - engineer\n  - wizard\n---\n",
         ).unwrap();
         let llm = AlwaysOkLlm { reply };
 

@@ -29,14 +29,16 @@ fn is_remote(location: &str) -> bool {
 /// Narrow raw listings to deduped, on-target candidates. The URL is a job's identity, so we
 /// drop URLs already in `existing_urls` *and* collapse duplicate URLs within this batch
 /// (first occurrence wins) — a posting can surface twice in one scrape. Also drops titles that
-/// match no `match_title` (clear non-matches), and — when `remote_only` — listings with a known
-/// non-remote location. An *unknown* location is kept (not a clear non-match). Input order is
-/// preserved.
+/// match no `match_title` (clear non-matches), and — when the user is remote-only (i.e.
+/// `work_arrangements == ["remote"]`) — listings with a known non-remote location. An *unknown*
+/// location is kept (not a clear non-match). Input order is preserved.
 pub fn prefilter(
     listings: Vec<RawListing>,
     criteria: &TargetCriteria,
     existing_urls: &HashSet<String>,
 ) -> Vec<RawListing> {
+    // Treat user as remote-only iff their sole arrangement is "remote".
+    let remote_only = criteria.work_arrangements == ["remote"];
     let mut seen: HashSet<String> = HashSet::new();
     listings
         .into_iter()
@@ -44,7 +46,7 @@ pub fn prefilter(
         .filter(|l| seen.insert(l.url.clone())) // within-batch dedup-by-url: keep first occurrence
         .filter(|l| title_matches(&l.title, &criteria.match_titles))
         .filter(|l| {
-            !criteria.remote_only
+            !remote_only
                 || match &l.location {
                     Some(loc) => is_remote(loc),
                     None => true, // unknown location is not a clear non-match (recall-oriented)
@@ -64,7 +66,8 @@ mod tests {
                 "ai engineer".into(),
                 "software engineer".into(),
             ],
-            remote_only: true,
+            target_titles: vec![],
+            work_arrangements: vec!["remote".into()],
             target_levels: vec![],
             comp_floor: None,
             comp_target: None,
@@ -97,7 +100,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_only_drops_onsite_and_dedup_drops_known() {
+    fn remote_arrangements_drops_onsite_and_dedup_drops_known() {
         let mut existing = HashSet::new();
         existing.insert("u1".to_string());
         let ls = vec![
@@ -110,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_location_kept_when_remote_only() {
+    fn unknown_location_kept_when_arrangements_remote_only() {
         let ls = vec![listing("AI Engineer", "u1", None)];
         let kept = prefilter(ls, &crit(), &HashSet::new());
         assert_eq!(kept.len(), 1); // unknown location is not a clear non-match

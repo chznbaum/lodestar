@@ -1,6 +1,6 @@
 //! Reads the user's targeting from `profile/target_criteria.md`. `match_titles` is the
-//! recall-oriented expanded alias list the discovery pre-filter matches against; `remote_only`
-//! is derived from the note's `location_requirement` field.
+//! recall-oriented expanded alias list the discovery pre-filter matches against;
+//! `work_arrangements` lists the candidate's acceptable arrangements (e.g. `["remote"]`).
 // Consumed by the discovery chain (Task 5); suppress dead-code until wired.
 #![allow(dead_code)]
 
@@ -9,21 +9,23 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// Per-dimension weights used for scoring jobs against the user's criteria.
-/// All four weights must sum to 1.0. `Default` returns the recommended baseline.
+/// All five weights must sum to 1.0. `Default` returns the recommended baseline.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct FitWeights {
     pub seniority: f64,
     pub skills: f64,
     pub comp: f64,
+    pub arrangement: f64,
     pub domain: f64,
 }
 
 impl Default for FitWeights {
     fn default() -> Self {
         Self {
-            seniority: 0.3,
-            skills: 0.35,
-            comp: 0.25,
+            seniority: 0.20,
+            skills: 0.25,
+            comp: 0.30,
+            arrangement: 0.15,
             domain: 0.10,
         }
     }
@@ -32,8 +34,8 @@ impl Default for FitWeights {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TargetCriteria {
     pub match_titles: Vec<String>,
-    /// True when the note's `location_requirement` is `remote_only`.
-    pub remote_only: bool,
+    pub target_titles: Vec<String>,
+    pub work_arrangements: Vec<String>,
     // --- fit configuration ---
     pub target_levels: Vec<String>,
     pub comp_floor: Option<i64>,
@@ -55,7 +57,10 @@ pub struct TargetCriteria {
 struct Front {
     #[serde(default)]
     match_titles: Vec<String>,
-    location_requirement: Option<String>,
+    #[serde(default)]
+    target_titles: Vec<String>,
+    #[serde(default)]
+    work_arrangements: Vec<String>,
     // --- fit configuration ---
     #[serde(default)]
     target_levels: Vec<String>,
@@ -91,7 +96,8 @@ pub fn parse_target_criteria(text: &str) -> Result<TargetCriteria, String> {
     let f: Front = serde_yaml::from_str(fm).map_err(|e| e.to_string())?;
     Ok(TargetCriteria {
         match_titles: f.match_titles,
-        remote_only: f.location_requirement.as_deref() == Some("remote_only"),
+        target_titles: f.target_titles,
+        work_arrangements: f.work_arrangements,
         target_levels: f.target_levels,
         comp_floor: f.comp_floor,
         comp_target: f.comp_target,
@@ -118,31 +124,32 @@ pub fn read_target_criteria(vault_path: &str) -> Result<TargetCriteria, String> 
 mod tests {
     use super::*;
 
-    const FIXTURE: &str = "---\ntype: target_criteria\nlocation_requirement: remote_only\nmatch_titles:\n  - founding engineer\n  - ai engineer\n---\n\nbody\n";
+    const FIXTURE: &str = "---\ntype: target_criteria\nwork_arrangements: [remote]\nmatch_titles:\n  - founding engineer\n  - ai engineer\n---\n\nbody\n";
 
-    const FULL: &str = "---\ntype: target_criteria\nlocation_requirement: remote_only\nmatch_titles:\n  - founding engineer\ntarget_levels: [senior, dept-head]\ncomp_floor: 180000\ncomp_target: 220000\ncomp_currency: USD\nemployment_types: [full_time, fractional]\nopen_to_relocation: false\nwork_authorization: [US]\nrequires_sponsorship: false\npreferred_domains: [dev_tools]\navoid_domains: [gambling]\nfit_weights: { seniority: 0.25, skills: 0.4, comp: 0.25, domain: 0.1 }\n---\n";
+    const FULL: &str = "---\ntype: target_criteria\nwork_arrangements: [remote]\ntarget_titles: [\"Founding Engineer\", \"Senior Software Engineer\"]\nmatch_titles:\n  - founding engineer\ntarget_levels: [senior, dept-head]\ncomp_floor: 180000\ncomp_target: 220000\ncomp_currency: USD\nemployment_types: [full_time, fractional]\nopen_to_relocation: false\nwork_authorization: [US]\nrequires_sponsorship: false\npreferred_domains: [dev_tools]\navoid_domains: [gambling]\nfit_weights: { seniority: 0.25, skills: 0.4, comp: 0.25, arrangement: 0.0, domain: 0.1 }\n---\n";
 
     #[test]
-    fn parses_match_titles_and_remote_flag() {
+    fn parses_match_titles_and_work_arrangements() {
         let c = parse_target_criteria(FIXTURE).unwrap();
         assert_eq!(
             c.match_titles,
             vec!["founding engineer".to_string(), "ai engineer".to_string()]
         );
-        assert!(c.remote_only);
+        assert_eq!(c.work_arrangements, vec!["remote".to_string()]);
     }
 
     #[test]
     fn missing_fields_default_safely() {
         let c = parse_target_criteria("---\ntype: target_criteria\n---\n").unwrap();
         assert!(c.match_titles.is_empty());
-        assert!(!c.remote_only); // no location_requirement -> not remote-only
+        assert!(c.work_arrangements.is_empty()); // absent -> empty vec
+        assert!(c.target_titles.is_empty());
     }
 
     #[test]
-    fn non_remote_location_requirement_is_not_remote_only() {
-        let c = parse_target_criteria("---\nlocation_requirement: hybrid\n---\n").unwrap();
-        assert!(!c.remote_only);
+    fn non_remote_work_arrangements_parses() {
+        let c = parse_target_criteria("---\nwork_arrangements: [hybrid, onsite]\n---\n").unwrap();
+        assert_eq!(c.work_arrangements, vec!["hybrid".to_string(), "onsite".to_string()]);
     }
 
     #[test]
@@ -157,6 +164,10 @@ mod tests {
         assert!(!c.requires_sponsorship);
         assert_eq!(c.avoid_domains, vec!["gambling"]);
         assert!((c.fit_weights.skills - 0.4).abs() < 1e-9);
+        assert_eq!(
+            c.target_titles,
+            vec!["Founding Engineer".to_string(), "Senior Software Engineer".to_string()]
+        );
     }
 
     #[test]
@@ -181,7 +192,44 @@ mod tests {
     fn fit_weights_default_when_absent_sum_to_one() {
         let c = parse_target_criteria("---\ntype: target_criteria\n---\n").unwrap();
         let w = &c.fit_weights;
-        assert!((w.seniority + w.skills + w.comp + w.domain - 1.0).abs() < 1e-9);
+        assert!(
+            (w.seniority + w.skills + w.comp + w.arrangement + w.domain - 1.0).abs() < 1e-9,
+            "weights sum to {}, not 1.0",
+            w.seniority + w.skills + w.comp + w.arrangement + w.domain
+        );
         assert!(c.target_levels.is_empty()); // safe defaults
+    }
+
+    #[test]
+    #[ignore]
+    fn smoke_parses_real_vault_target_criteria() {
+        let vault = std::env::var("LODESTAR_VAULT")
+            .expect("LODESTAR_VAULT must be set to run this smoke test");
+        let c = read_target_criteria(&vault)
+            .expect("parse_target_criteria should succeed on the real vault note");
+        assert!(
+            !c.target_levels.is_empty(),
+            "target_levels must be non-empty; got empty"
+        );
+        assert!(
+            c.comp_floor.is_some(),
+            "comp_floor must be Some; got None"
+        );
+        assert!(
+            !c.work_arrangements.is_empty(),
+            "work_arrangements must be non-empty; got empty"
+        );
+        assert!(
+            !c.work_authorization.is_empty(),
+            "work_authorization must be non-empty; got empty"
+        );
+        println!("target_levels: {:?}", c.target_levels);
+        println!("comp_floor: {:?}", c.comp_floor);
+        println!("work_arrangements: {:?}", c.work_arrangements);
+        println!("work_authorization: {:?}", c.work_authorization);
+        println!("target_titles: {:?}", c.target_titles);
+        println!("fit_weights: seniority={} skills={} comp={} arrangement={} domain={}",
+            c.fit_weights.seniority, c.fit_weights.skills, c.fit_weights.comp,
+            c.fit_weights.arrangement, c.fit_weights.domain);
     }
 }

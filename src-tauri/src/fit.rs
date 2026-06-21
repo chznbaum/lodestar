@@ -58,17 +58,7 @@ pub fn hard_filters(
         _ => {}
     }
 
-    // 2. Remote (Dealbreaker).
-    // Only fires when profile is remote-only AND the role is known non-remote.
-    if p.remote_only && non_remote {
-        flags.push(db(
-            "remote",
-            format!(
-                "{} role; user is remote-only",
-                job.remote.as_deref().unwrap_or("onsite")
-            ),
-        ));
-    }
+    // 2. (arrangement soft-scoring — Task 5, not a hard dealbreaker here)
 
     // 3. Work authorization (Dealbreaker) — non-remote only.
     // Skip entirely for fully-remote roles (no jurisdiction constraint).
@@ -201,7 +191,8 @@ mod tests {
     fn base_profile() -> TargetCriteria {
         TargetCriteria {
             match_titles: vec![],
-            remote_only: false,
+            target_titles: vec![],
+            work_arrangements: vec![],
             target_levels: vec![],
             comp_floor: None,
             comp_target: None,
@@ -216,39 +207,6 @@ mod tests {
             current_location: None,
             preferred_locations: vec![],
         }
-    }
-
-    // --- Check 2: Remote ---
-
-    #[test]
-    fn remote_onsite_remote_only_profile_fires_dealbreaker() {
-        let job = Job {
-            remote: Some("onsite".to_string()),
-            ..base_job()
-        };
-        let profile = TargetCriteria {
-            remote_only: true,
-            ..base_profile()
-        };
-        let flags = hard_filters(&job, &profile, None);
-        assert_eq!(flags.len(), 1);
-        assert_eq!(flags[0].check, "remote");
-        assert_eq!(flags[0].level, FlagLevel::Dealbreaker);
-    }
-
-    #[test]
-    fn remote_unknown_remote_only_profile_no_flag() {
-        // remote: None → unknown → no remote flag even when profile is remote_only
-        let job = base_job(); // remote: None
-        let profile = TargetCriteria {
-            remote_only: true,
-            ..base_profile()
-        };
-        let flags = hard_filters(&job, &profile, None);
-        assert!(
-            flags.iter().all(|f| f.check != "remote"),
-            "should not fire remote flag when job remote is unknown"
-        );
     }
 
     // --- Check 1: Company screening ---
