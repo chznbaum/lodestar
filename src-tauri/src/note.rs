@@ -213,6 +213,15 @@ pub fn slugify(name: &str) -> String {
     out
 }
 
+/// Unwrap a `[[slug]]` wikilink to its bare slug; pass plain strings through. Trims.
+pub fn strip_wikilink(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("[[")
+        .trim_end_matches("]]")
+        .trim()
+        .to_string()
+}
+
 /// Read every eligible note under `dir`, parsing each via `parse(slug, text)`. Skips
 /// non-`.md`/underscored files (per `note_slug`); a **missing dir yields an empty Vec**
 /// (a present-but-unreadable dir errors). Parse errors are logged and that note skipped.
@@ -299,6 +308,13 @@ mod tests {
         assert_eq!(note_slug("_template.md"), None);
         assert_eq!(note_slug("notes.txt"), None);
         assert_eq!(note_slug(".md"), None);
+    }
+
+    #[test]
+    fn strip_wikilink_unwraps_and_passes_through() {
+        assert_eq!(strip_wikilink("[[stripe]]"), "stripe");
+        assert_eq!(strip_wikilink("stripe"), "stripe");
+        assert_eq!(strip_wikilink("  [[a-b]]  "), "a-b");
     }
 
     #[test]

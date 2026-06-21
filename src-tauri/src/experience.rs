@@ -34,17 +34,6 @@ struct Front {
     tagline: Option<String>,
 }
 
-/// Strip a wikilink wrapper (e.g. `"[[customer-advocacy]]"` → `"customer-advocacy"`).
-/// If no wikilink delimiters are present, returns the trimmed string as-is.
-fn strip_wikilink(s: &str) -> String {
-    let inner = s
-        .trim()
-        .strip_prefix("[[")
-        .and_then(|s| s.strip_suffix("]]"))
-        .unwrap_or(s.trim());
-    inner.trim().to_string()
-}
-
 /// Treat a blank string (None or whitespace-only) as absent.
 fn nonempty(s: Option<String>) -> Option<String> {
     s.filter(|v| !v.trim().is_empty())
@@ -62,7 +51,7 @@ fn parse_experience(slug: &str, text: &str) -> Result<Experience, String> {
         .is_current
         .unwrap_or_else(|| end_date.as_deref().is_none_or(|s| s.trim().is_empty()));
 
-    let competencies = f.competencies.iter().map(|c| strip_wikilink(c)).collect();
+    let competencies = f.competencies.iter().map(|c| note::strip_wikilink(c)).collect();
 
     Ok(Experience {
         slug: slug.to_string(),

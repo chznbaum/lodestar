@@ -129,15 +129,6 @@ struct Front {
     jd_raw_file: Option<String>,
 }
 
-/// Unwrap a `[[slug]]` wikilink to its bare slug; pass plain strings through. Trims.
-pub fn strip_wikilink(raw: &str) -> String {
-    raw.trim()
-        .trim_start_matches("[[")
-        .trim_end_matches("]]")
-        .trim()
-        .to_string()
-}
-
 #[allow(dead_code)]
 pub fn validate_job_status(status: &str) -> Result<(), String> {
     if JOB_STATUSES.contains(&status) {
@@ -154,7 +145,7 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
     Ok(Job {
         slug: slug.to_string(),
         title: f.title.unwrap_or_else(|| slug.to_string()),
-        company: f.company.as_deref().map(strip_wikilink),
+        company: f.company.as_deref().map(note::strip_wikilink),
         url: f.url,
         level: f.level,
         location: f.location,
@@ -600,13 +591,6 @@ mod tests {
     fn jd_fetched_true_from_body_header_alone() {
         let t = "---\nid: x\ntitle: X\n---\n\n## JD — structured\n\nbody\n";
         assert!(parse_job("x", t).unwrap().jd_fetched);
-    }
-
-    #[test]
-    fn strip_wikilink_unwraps_and_passes_through() {
-        assert_eq!(strip_wikilink("[[stripe]]"), "stripe");
-        assert_eq!(strip_wikilink("stripe"), "stripe");
-        assert_eq!(strip_wikilink("  [[a-b]]  "), "a-b");
     }
 
     #[test]
