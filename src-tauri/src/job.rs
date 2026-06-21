@@ -16,6 +16,11 @@ pub const EMPLOYMENT_TYPES: &[&str] = &[
 ];
 
 #[allow(dead_code)]
+pub const COMP_PERIODS: &[&str] = &[
+    "annual", "hourly", "daily", "monthly", "weekly", "biweekly",
+];
+
+#[allow(dead_code)]
 pub const REMOTE_KINDS: &[&str] = &["remote", "hybrid", "onsite"];
 
 /// Valid values for `visa_sponsorship` and `relocation`.
@@ -183,11 +188,9 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
 }
 
 /// Integer-typed frontmatter fields — validated on write, coerced/degraded on read.
-#[allow(dead_code)]
-const INT_FIELDS: &[&str] = &["comp_low", "comp_high", "yoe_min", "yoe_max", "fit_score"];
+pub const INT_FIELDS: &[&str] = &["comp_low", "comp_high", "yoe_min", "yoe_max", "fit_score"];
 /// List-typed frontmatter fields — set via `set_job_list_field`, never the scalar writer.
-#[allow(dead_code)]
-const LIST_FIELDS: &[&str] = &["tech_stack", "required_skills", "preferred_skills", "researched", "countries", "metros"];
+pub const LIST_FIELDS: &[&str] = &["tech_stack", "required_skills", "preferred_skills", "researched", "countries", "metros"];
 
 /// Deserialize the frontmatter strictly; on failure, sanitize the typed (int/list) fields so a
 /// single malformed value degrades to empty (with a logged warning) and retry — one bad field
@@ -383,13 +386,13 @@ pub fn write_job_stub(vault_path: &str, job: &Job) -> Result<String, String> {
 }
 
 /// Map an enum-validated field name to its allowed value set. Other fields are free text.
-#[allow(dead_code)]
-fn enum_values_for(field: &str) -> Option<&'static [&'static str]> {
+pub fn enum_values_for(field: &str) -> Option<&'static [&'static str]> {
     match field {
         "level" => Some(VALID_LEVELS),
         "employment_type" => Some(EMPLOYMENT_TYPES),
         "remote" => Some(REMOTE_KINDS),
         "visa_sponsorship" | "relocation" => Some(SPONSORSHIP),
+        "comp_period" => Some(COMP_PERIODS),
         "status" => Some(JOB_STATUSES),
         _ => None,
     }
@@ -812,6 +815,32 @@ mod tests {
         let j = parse_job("eng-acme", text).unwrap();
         assert!(j.countries.is_empty());
         assert!(j.metros.is_empty());
+    }
+
+    #[test]
+    fn comp_period_valid_value_accepted_invalid_rejected() {
+        // comp_period is now a validated enum; valid in-set value is written, off-set is rejected.
+        let dir = std::env::temp_dir().join(format!("lodestar-compperiod-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        std::fs::write(dir.join("jobs/senior-engineer-acme.md"), DETAIL).unwrap();
+
+        // In-set value "biweekly" → accepted and written.
+        update_job_field(vault.clone(), "senior-engineer-acme".into(), "comp_period".into(), "biweekly".into()).unwrap();
+        let j = parse_job("senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap()).unwrap();
+        assert_eq!(j.comp_period.as_deref(), Some("biweekly"), "biweekly must be accepted");
+
+        // Off-set value "per-year" → rejected with an error, file unchanged.
+        let err = update_job_field(vault.clone(), "senior-engineer-acme".into(), "comp_period".into(), "per-year".into())
+            .unwrap_err();
+        assert!(err.contains("invalid") || err.contains("expected one of"),
+            "error must mention invalid/expected; got: {err:?}");
+        let j2 = parse_job("senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap()).unwrap();
+        assert_eq!(j2.comp_period.as_deref(), Some("biweekly"), "rejected write must leave file unchanged");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

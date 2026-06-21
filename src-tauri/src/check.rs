@@ -24,6 +24,10 @@ pub struct Step {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<i64>,
+    /// Recorded issues when status is `"warning"`: core work succeeded but with noted problems.
+    /// Empty on ok/failed steps; not emitted when empty (skip_serializing_if).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -288,6 +292,7 @@ mod tests {
             finished_at: None,
             error: None,
             cost: Some(5),
+            warnings: vec![],
         };
         let updated = append_step(&vault, "2026-06-17-0001", step).unwrap();
         assert_eq!(updated.steps.len(), 1);
@@ -303,9 +308,9 @@ mod tests {
     fn summary_tallies_credits_and_usd_by_class() {
         let mut c = empty_run("2026-06-18-0001");
         c.steps = vec![
-            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(25) },
-            Step { stage: "structure-listings".into(), class: "llm".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(500_000) }, // $0.50 in micro-dollars
-            Step { stage: "pre-filter".into(), class: "script".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None },
+            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(25), warnings: vec![] },
+            Step { stage: "structure-listings".into(), class: "llm".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(500_000), warnings: vec![] }, // $0.50 in micro-dollars
+            Step { stage: "pre-filter".into(), class: "script".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, warnings: vec![] },
         ];
         let s = CheckSummary::from(&c);
         assert_eq!(s.credits, 25); // scrape steps only
@@ -324,8 +329,8 @@ mod tests {
         newer.started_at = Some("2026-06-17T09:00:00".into());
         newer.roles_found = 3;
         newer.steps = vec![
-            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "stripe".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None },
-            Step { stage: "jd-scrape".into(), class: "scrape".into(), target: "x".into(), status: "failed".into(), attempts: 2, started_at: None, finished_at: None, error: Some("timeout".into()), cost: None },
+            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "stripe".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, warnings: vec![] },
+            Step { stage: "jd-scrape".into(), class: "scrape".into(), target: "x".into(), status: "failed".into(), attempts: 2, started_at: None, finished_at: None, error: Some("timeout".into()), cost: None, warnings: vec![] },
         ];
         write_check(&vault, &older).unwrap();
         write_check(&vault, &newer).unwrap();
@@ -341,5 +346,77 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
         assert!(list_checks("/no/such/vault".into()).unwrap().is_empty());
+    }
+
+    // ── Warning-step tests (TDD RED → GREEN) ────────────────────────────────
+
+    #[test]
+    fn step_with_warning_status_and_warnings_round_trips() {
+        // Build a check that has a warning step, render it, parse it back:
+        // status and warnings must survive the round-trip intact.
+        let mut c = empty_run("2026-06-21-warn");
+        c.steps = vec![Step {
+            stage: "research-gaps".into(),
+            class: "llm".into(),
+            target: "stripe".into(),
+            status: "warning".into(),
+            attempts: 1,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            cost: Some(1_000),
+            warnings: vec![
+                "rejected countries: expected array, got string".into(),
+                "missing equity field".into(),
+            ],
+        }];
+        let rendered = render_check_note(&c);
+        let parsed = parse_check("2026-06-21-warn", &rendered).unwrap();
+        assert_eq!(parsed.steps.len(), 1);
+        assert_eq!(parsed.steps[0].status, "warning");
+        assert_eq!(
+            parsed.steps[0].warnings,
+            vec![
+                "rejected countries: expected array, got string".to_string(),
+                "missing equity field".to_string(),
+            ]
+        );
+        assert!(parsed.steps[0].error.is_none());
+    }
+
+    #[test]
+    fn ok_step_emits_no_warnings_key() {
+        // An ok step must NOT emit a `warnings:` key in the serialized YAML.
+        let mut c = empty_run("2026-06-21-no-warn");
+        c.steps = vec![Step {
+            stage: "careers-scrape".into(),
+            class: "scrape".into(),
+            target: "stripe".into(),
+            status: "ok".into(),
+            attempts: 1,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            cost: Some(5),
+            warnings: vec![],
+        }];
+        let rendered = render_check_note(&c);
+        assert!(
+            !rendered.contains("warnings:"),
+            "ok step must not emit warnings key; got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn old_step_without_warnings_key_parses_with_empty_warnings() {
+        // A note serialized before the warnings field was added must still parse cleanly.
+        // (Exercises the `#[serde(default)]` on Step.warnings.)
+        let text = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: complete\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n---\n\n## Summary\n\n1 companies · 2 roles found · 0 errors\n";
+        let c = parse_check("2026-06-17-0001", text).unwrap();
+        assert_eq!(c.steps.len(), 1);
+        assert!(
+            c.steps[0].warnings.is_empty(),
+            "missing warnings key should default to empty vec"
+        );
     }
 }

@@ -30,6 +30,38 @@ pub(crate) fn record_step(
     error: Option<String>,
     cost: Option<i64>,
 ) -> Result<Step, String> {
+    build_and_record_step(vault_path, run_id, stage, class, target, started_at, status, error, vec![], cost)
+}
+
+/// Build a completed `Step` with status `"warning"`, recording the given warnings (non-empty),
+/// append it to the run note, and return it. `error` is always `None` for warned steps.
+pub(crate) fn record_step_warned(
+    vault_path: &str,
+    run_id: &str,
+    stage: &str,
+    class: &str,
+    target: &str,
+    started_at: String,
+    warnings: Vec<String>,
+    cost: Option<i64>,
+) -> Result<Step, String> {
+    debug_assert!(!warnings.is_empty(), "record_step_warned requires at least one warning");
+    build_and_record_step(vault_path, run_id, stage, class, target, started_at, "warning", None, warnings, cost)
+}
+
+/// Shared builder: constructs a `Step`, appends it to the run note, and returns it.
+fn build_and_record_step(
+    vault_path: &str,
+    run_id: &str,
+    stage: &str,
+    class: &str,
+    target: &str,
+    started_at: String,
+    status: &str,
+    error: Option<String>,
+    warnings: Vec<String>,
+    cost: Option<i64>,
+) -> Result<Step, String> {
     let step = Step {
         stage: stage.to_string(),
         class: class.to_string(),
@@ -40,6 +72,7 @@ pub(crate) fn record_step(
         finished_at: Some(now_iso()),
         error,
         cost,
+        warnings,
     };
     append_step(vault_path, run_id, step.clone())?;
     Ok(step)
@@ -162,6 +195,66 @@ mod tests {
         assert_eq!(reread.steps[0].status, "failed");
         assert!(reread.steps[0].error.as_deref().unwrap_or("").contains("403"));
         assert_eq!(reread.steps[0].cost, None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── Warning recorder tests (TDD RED → GREEN) ─────────────────────────
+
+    #[test]
+    fn record_step_warned_writes_warning_status_and_warnings() {
+        // record_step_warned must write a step whose status is "warning",
+        // whose warnings match, and whose error is None.
+        let dir = std::env::temp_dir().join(format!("lodestar-runner-warn-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        open_run(&vault);
+
+        let started = "2026-06-21T10:00:00".to_string();
+        let warnings = vec![
+            "rejected countries: expected array, got string".to_string(),
+            "missing equity field".to_string(),
+        ];
+        let step = record_step_warned(
+            &vault, "2026-06-17-0001",
+            "research-gaps", "llm", "stripe",
+            started, warnings.clone(), Some(1_000),
+        )
+        .unwrap();
+
+        assert_eq!(step.status, "warning");
+        assert_eq!(step.warnings, warnings);
+        assert!(step.error.is_none());
+
+        let reread = get_check(vault, "2026-06-17-0001".into()).unwrap();
+        assert_eq!(reread.steps.len(), 1);
+        assert_eq!(reread.steps[0].status, "warning");
+        assert_eq!(reread.steps[0].warnings, warnings);
+        assert!(reread.steps[0].error.is_none());
+        assert_eq!(reread.steps[0].cost, Some(1_000));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn record_step_ok_emits_no_warnings_key_in_note() {
+        // An ok step written by record_step must not produce a "warnings:" key in the note.
+        let dir = std::env::temp_dir().join(format!("lodestar-runner-ok2-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        open_run(&vault);
+
+        record_step(
+            &vault, "2026-06-17-0001",
+            "careers-scrape", "scrape", "stripe",
+            "2026-06-21T10:00:00".to_string(), "ok", None, Some(5),
+        )
+        .unwrap();
+
+        let path = dir.join("checks").join("2026-06-17-0001.md");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("warnings:"),
+            "ok step must not emit warnings key; got:\n{text}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

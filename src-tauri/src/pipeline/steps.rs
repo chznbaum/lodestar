@@ -30,16 +30,18 @@ use crate::check::{get_check, write_check, Check};
 use crate::config::{model_for, PipelineConfig};
 use crate::job::{
     job_slug, list_jobs, parse_job, set_job_list_field, set_job_section, update_job_field,
-    write_job_stub, Job, EMPLOYMENT_TYPES, REMOTE_KINDS, SPONSORSHIP, VALID_LEVELS,
+    write_job_stub, Job, COMP_PERIODS, EMPLOYMENT_TYPES, REMOTE_KINDS, SPONSORSHIP, VALID_LEVELS,
 };
 use crate::llm::Llm;
 use crate::pipeline::filter::{prefilter, RawListing};
 use crate::pipeline::queue::{NewTask, Queue, QueuedTask, MAX_ATTEMPTS, TRANSIENT_SCRAPE_MAX_ATTEMPTS};
-use crate::pipeline::runner::{now_iso, record_step, run_scrape_step};
+use crate::pipeline::gaps::detect_gaps;
+use crate::pipeline::runner::{now_iso, record_step, record_step_warned, run_scrape_step};
 use crate::profile::read_target_criteria;
 use crate::prompts::{
-    build_structure_jd_prompt, build_structure_listings_prompt, parse_structured_jd,
-    parse_structured_listings, StructuredJd, StructuredListing,
+    build_research_gaps_prompt, build_structure_jd_prompt, build_structure_listings_prompt,
+    parse_and_validate_research, parse_structured_jd, parse_structured_listings, ResearchedWrite,
+    StructuredJd, StructuredListing, TypedValue,
 };
 use crate::sanitize::sanitize;
 use crate::scraper::{percent_encode_target_url, FailureClass, ProxyTier, Scraper};
@@ -118,6 +120,13 @@ struct FinalizePayload {
 struct JdStructurePayload {
     slug: String,
     sanitized: String,
+}
+
+/// Carries the job slug + detected gap field names through the `gap-detect → research-gaps` stages.
+#[derive(Serialize, Deserialize)]
+struct ResearchGapsPayload {
+    slug: String,
+    gaps: Vec<String>,
 }
 
 /// `<today>-NNNN`, sequenced per day over existing `checks/` notes.
@@ -265,6 +274,7 @@ fn fail_run(
                 finished_at: Some(now_iso()),
                 error: Some(error_msg.to_string()),
                 cost: None,
+                warnings: vec![],
             });
         }
         run.status = "failed".into();
@@ -666,6 +676,194 @@ fn dispatch_non_scrape<L: Llm>(
                 payload: "{}".into(),
             }])
         }
+        "gap-detect" => {
+            let slug = task.target.as_str();
+            let started = now_iso();
+            let path = Path::new(vault_path).join("jobs").join(format!("{slug}.md"));
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("read {path:?}: {e}"))?;
+            let job = parse_job(slug, &text)?;
+            let gaps = detect_gaps(&job);
+            record_step(vault_path, run_id, "gap-detect", "script", slug, started, "ok", None, None)?;
+            if gaps.is_empty() {
+                Ok(vec![NewTask {
+                    run_id: run_id.into(),
+                    stage: "fit-score".into(),
+                    class: "script".into(),
+                    target: slug.to_string(),
+                    payload: "{}".into(),
+                }])
+            } else {
+                Ok(vec![NewTask {
+                    run_id: run_id.into(),
+                    stage: "research-gaps".into(),
+                    class: "llm".into(),
+                    target: slug.to_string(),
+                    payload: serde_json::to_string(&ResearchGapsPayload {
+                        slug: slug.to_string(),
+                        gaps,
+                    })
+                    .map_err(|e| e.to_string())?,
+                }])
+            }
+        }
+        "research-gaps" => {
+            let p: ResearchGapsPayload =
+                serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
+            let slug = p.slug.as_str();
+            let started = now_iso();
+
+            // Load job for title + company.
+            let path = Path::new(vault_path).join("jobs").join(format!("{slug}.md"));
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("read {path:?}: {e}"))?;
+            let job = parse_job(slug, &text)?;
+            let company = job.company.as_deref().unwrap_or("").to_string();
+
+            let prompt = build_research_gaps_prompt(
+                &model_for(cfg, "research-gaps"),
+                &job.title,
+                &company,
+                &p.gaps,
+            );
+
+            let resp = match llm.complete(&prompt) {
+                Ok(r) => r,
+                Err(e) => {
+                    record_step(
+                        vault_path, run_id, "research-gaps", "llm", slug, started,
+                        "failed", Some(e.clone()), None,
+                    )?;
+                    return Err(e);
+                }
+            };
+            let cost = resp.cost_micro_usd;
+
+            let (writes, rejections) = match parse_and_validate_research(&resp.content, &p.gaps) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    // Total parse failure (not JSON / not an array) — hard failure, record cost.
+                    record_step(
+                        vault_path, run_id, "research-gaps", "llm", slug, started,
+                        "failed", Some(e.clone()), cost,
+                    )?;
+                    return Err(e);
+                }
+            };
+
+            // Write each validated ResearchedWrite. A write `Err` is a HARD FAILURE: we record the
+            // step as failed with the verbatim underlying error passed through (no categorizing or
+            // guessing the cause) and return before any provenance / notes / success telemetry runs,
+            // so a failed step never writes notes claiming success.
+            let mut written: Vec<&ResearchedWrite> = Vec::new();
+            for w in &writes {
+                let result = match &w.value {
+                    TypedValue::Scalar(s) => update_job_field(
+                        vault_path.to_string(),
+                        slug.to_string(),
+                        w.field.clone(),
+                        s.clone(),
+                    ),
+                    TypedValue::List(items) => set_job_list_field(
+                        vault_path.to_string(),
+                        slug.to_string(),
+                        w.field.clone(),
+                        items.clone(),
+                    ),
+                };
+                if let Err(underlying) = result {
+                    let msg = match &w.value {
+                        TypedValue::Scalar(s) => format!(
+                            "research-gaps: write failed for field {:?} (value {:?}): {underlying}",
+                            w.field, s
+                        ),
+                        TypedValue::List(items) => format!(
+                            "research-gaps: write failed for field {:?} (value {:?}): {underlying}",
+                            w.field, items
+                        ),
+                    };
+                    record_step(
+                        vault_path, run_id, "research-gaps", "llm", slug, started,
+                        "failed", Some(msg.clone()), cost,
+                    )?;
+                    return Err(msg);
+                }
+                written.push(w);
+            }
+            let written_fields: Vec<String> = written.iter().map(|w| w.field.clone()).collect();
+
+            // Provenance: merge written fields into job.researched (dedup, preserve order).
+            {
+                let path2 = Path::new(vault_path).join("jobs").join(format!("{slug}.md"));
+                let text2 = std::fs::read_to_string(&path2)
+                    .map_err(|e| format!("read {path2:?}: {e}"))?;
+                let current_job = parse_job(slug, &text2)?;
+                let mut researched = current_job.researched.clone();
+                for field in &written_fields {
+                    if !researched.contains(field) {
+                        researched.push(field.clone());
+                    }
+                }
+                set_job_list_field(
+                    vault_path.to_string(),
+                    slug.to_string(),
+                    "researched".into(),
+                    researched,
+                )?;
+            }
+
+            // ## Research notes section.
+            {
+                let mut lines: Vec<String> = Vec::new();
+                if !written.is_empty() {
+                    lines.push("**Accepted**".to_string());
+                    for w in &written {
+                        let value_str = match &w.value {
+                            TypedValue::Scalar(s) => s.clone(),
+                            TypedValue::List(items) => items.join(", "),
+                        };
+                        lines.push(format!(
+                            "- **{}:** {} _(source: {} · confidence: {})_",
+                            w.field, value_str, w.source, w.confidence
+                        ));
+                    }
+                }
+                if !rejections.is_empty() {
+                    if !written.is_empty() {
+                        lines.push(String::new());
+                    }
+                    lines.push("**Rejected**".to_string());
+                    for r in &rejections {
+                        lines.push(format!("- **{}:** rejected — {}", r.field, r.reason));
+                    }
+                }
+                let md = lines.join("\n");
+                set_job_section(vault_path, slug, "## Research notes", &md)?;
+            }
+
+            // Telemetry.
+            if rejections.is_empty() {
+                record_step(
+                    vault_path, run_id, "research-gaps", "llm", slug, started, "ok", None, cost,
+                )?;
+            } else {
+                let warnings: Vec<String> = rejections
+                    .iter()
+                    .map(|r| format!("{}: {}", r.field, r.reason))
+                    .collect();
+                record_step_warned(
+                    vault_path, run_id, "research-gaps", "llm", slug, started, warnings, cost,
+                )?;
+            }
+
+            Ok(vec![NewTask {
+                run_id: run_id.into(),
+                stage: "fit-score".into(),
+                class: "script".into(),
+                target: slug.to_string(),
+                payload: "{}".into(),
+            }])
+        }
         other => Err(format!("unknown stage: {other}")),
     }
 }
@@ -699,12 +897,12 @@ fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<()
     write_enum!("visa_sponsorship", &jd.visa_sponsorship, SPONSORSHIP);
     write_enum!("relocation", &jd.relocation, SPONSORSHIP);
     write_enum!("level", &jd.level, VALID_LEVELS);
+    write_enum!("comp_period", &jd.comp_period, COMP_PERIODS);
 
     // Free-text scalar fields.
     if let Some(v) = jd.comp_low { write_scalar("comp_low", &v.to_string())?; }
     if let Some(v) = jd.comp_high { write_scalar("comp_high", &v.to_string())?; }
     if let Some(v) = jd.comp_currency.as_deref() { write_scalar("comp_currency", v)?; }
-    if let Some(v) = jd.comp_period.as_deref() { write_scalar("comp_period", v)?; }
     if let Some(v) = jd.comp_equity.as_deref() { write_scalar("comp_equity", v)?; }
     if let Some(v) = jd.yoe_min { write_scalar("yoe_min", &v.to_string())?; }
     if let Some(v) = jd.yoe_max { write_scalar("yoe_max", &v.to_string())?; }
@@ -723,6 +921,36 @@ fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<()
     }
     if !jd.preferred_skills.is_empty() {
         set_job_list_field(vault_path.to_string(), slug.to_string(), "preferred_skills".into(), jd.preferred_skills.clone())?;
+    }
+
+    // Location resolution: write countries as-extracted (prompt constrains to ISO alpha-2),
+    // then resolve locations → metro slugs deterministically via MetroIndex.
+    if !jd.countries.is_empty() {
+        set_job_list_field(vault_path.to_string(), slug.to_string(), "countries".into(), jd.countries.clone())?;
+    }
+    if !jd.locations.is_empty() {
+        // Missing metros/ dir degrades gracefully: read_notes_in returns Ok([]) for a missing
+        // dir, so we end up with an empty index and no metros written — not a stage failure.
+        let metros = match crate::metro::list_metros(vault_path) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("structure-jd: could not load metros (skipping resolution): {e}");
+                vec![]
+            }
+        };
+        let index = crate::metro::MetroIndex::build(&metros);
+        let mut resolved: Vec<String> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for loc in &jd.locations {
+            if let Some(metro_slug) = index.resolve(loc) {
+                if seen.insert(metro_slug.clone()) {
+                    resolved.push(metro_slug);
+                }
+            }
+        }
+        if !resolved.is_empty() {
+            set_job_list_field(vault_path.to_string(), slug.to_string(), "metros".into(), resolved)?;
+        }
     }
 
     // Candidate-brief body section.
@@ -1041,6 +1269,46 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// `write_jd_fields` with an off-set `comp_period` value must SKIP + warn, not fail the stage.
+    /// An in-set value must be written normally.
+    #[test]
+    fn write_jd_fields_skips_off_set_comp_period_and_accepts_valid() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-compperiod-jd-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let vault = dir.to_str().unwrap();
+
+        // Minimal job stub.
+        let stub = "---\nid: eng-acme\ntitle: Engineer\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\nstatus: new\n---\n";
+        std::fs::write(dir.join("jobs/eng-acme.md"), stub).unwrap();
+
+        // Off-set comp_period: "per-year" is not in COMP_PERIODS.
+        let jd_bad = StructuredJd {
+            comp_low: Some(150000),
+            comp_period: Some("per-year".to_string()),
+            ..StructuredJd::default()
+        };
+        // Must NOT return Err (stage must not fail over a bad enum).
+        write_jd_fields(vault, "eng-acme", &jd_bad).expect("write_jd_fields must not fail on off-set comp_period");
+        let j = crate::job::parse_job("eng-acme",
+            &std::fs::read_to_string(dir.join("jobs/eng-acme.md")).unwrap()).unwrap();
+        assert_eq!(j.comp_period, None, "off-set comp_period must be skipped (not written)");
+        assert_eq!(j.comp_low, Some(150000), "other fields must still be written");
+
+        // Reset stub, verify in-set value IS written.
+        std::fs::write(dir.join("jobs/eng-acme.md"), stub).unwrap();
+        let jd_good = StructuredJd {
+            comp_period: Some("weekly".to_string()),
+            ..StructuredJd::default()
+        };
+        write_jd_fields(vault, "eng-acme", &jd_good).expect("write_jd_fields must succeed with valid comp_period");
+        let j2 = crate::job::parse_job("eng-acme",
+            &std::fs::read_to_string(dir.join("jobs/eng-acme.md")).unwrap()).unwrap();
+        assert_eq!(j2.comp_period.as_deref(), Some("weekly"), "in-set comp_period must be written");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// After a successful drain `last_checked` is stamped on the target company note.
     #[test]
     fn successful_run_stamps_last_checked() {
@@ -1235,6 +1503,55 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// After structure-jd, `countries` and `metros` are written to the job note.
+    /// Metro resolution is deterministic (index-driven); fixture seeds a DC metro note.
+    /// The pre-existing test's fixture has NO `metros/` dir — this test verifies that
+    /// the missing-metros-dir path degrades gracefully (empty → skipped, not an error).
+    #[test]
+    fn job_detail_structure_jd_writes_countries_and_metros() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let dir = job_detail_fixture_vault();
+        // Seed a metros/ dir with one DC-area metro note.
+        std::fs::create_dir_all(dir.join("metros")).unwrap();
+        let dc_slug = "washington-arlington-alexandria-dc-va-md-wv";
+        std::fs::write(
+            dir.join(format!("metros/{dc_slug}.md")),
+            "---\nname: Washington-Arlington-Alexandria, DC-VA-MD-WV\ncountry: US\naliases:\n  - Washington\n  - DC\n  - Washington DC\n  - Washington, DC\n---\n",
+        ).unwrap();
+
+        let vault = dir.to_str().unwrap();
+        let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let _ = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-20").unwrap();
+
+        let scraper = FakeScraper { content: "<p>JD</p>".into(), credits: 5 };
+        let llm = FakeLlm {
+            reply: r#"{"comp_low":180000,"comp_high":220000,"comp_currency":"USD","comp_period":"annual",
+              "required_skills":["rust"],"remote":"remote","role_brief":"Build platform.",
+              "countries":["US"],"locations":["Washington, DC"]}"#
+                .into(),
+            cost_micro_usd: 1000,
+        };
+        let cfg = default_config();
+        let sink = NoopSink;
+        let never = |_: &str| false;
+        while pump_once(&queue, vault, &cfg, &scraper, &llm, &sink, &never).unwrap() {}
+
+        let j = crate::job::parse_job(
+            "senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(j.countries, vec!["US".to_string()], "countries must be written from StructuredJd");
+        assert_eq!(
+            j.metros,
+            vec![dc_slug.to_string()],
+            "metros must be resolved from locations via MetroIndex"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// A `job_detail` run that exhausts MAX_ATTEMPTS at the LLM stage must NOT stamp
     /// `last_checked` on any company note, and must NOT create a spurious note at
     /// `companies/<job-slug>.md` (the bug that would result if the kind-gate were absent).
@@ -1273,6 +1590,293 @@ mod tests {
             !dir.join("companies/senior-engineer-acme.md").exists(),
             "job_detail run must NOT create a company note named after the job slug"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── gap-detect / research-gaps tests ─────────────────────────────────────────────────────────
+
+    /// Write a job stub with the given frontmatter fields, opens a run, and enqueues `stage`
+    /// directly (bypassing jd-scrape/structure-jd). Returns (dir, vault, run_id, slug).
+    fn enqueue_stage(
+        stage: &str,
+        class: &str,
+        slug: &str,
+        payload: &str,
+        stub_fm: &str,
+    ) -> (std::path::PathBuf, String, String, SqliteQueue) {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir()
+            .join(format!("lodestar-gaps-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        std::fs::write(dir.join(format!("jobs/{slug}.md")), stub_fm).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        // Open a synthetic run.
+        let run_id = "2026-06-21-0001".to_string();
+        let run = crate::check::Check {
+            slug: run_id.clone(),
+            kind: "job_detail".into(),
+            trigger: "manual".into(),
+            status: "running".into(),
+            started_at: Some(now_iso()),
+            finished_at: None,
+            duration: None,
+            companies: vec![],
+            roles_found: 0,
+            errors: 0,
+            steps: vec![],
+        };
+        crate::check::write_check(&vault, &run).unwrap();
+        q.enqueue(NewTask {
+            run_id: run_id.clone(),
+            stage: stage.into(),
+            class: class.into(),
+            target: slug.into(),
+            payload: payload.into(),
+        })
+        .unwrap();
+        (dir, vault, run_id, q)
+    }
+
+    /// Test 1: scalar fill + provenance.
+    /// Job with `comp_low` empty; FakeLlm returns a valid `comp_low` item.
+    /// After pumping: `job.comp_low` is set, `job.researched` contains `comp_low`,
+    /// note has `## Research notes` with the value+source, step status is "ok".
+    #[test]
+    fn research_gaps_scalar_fill_and_provenance() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let slug = "eng-acme";
+        let stub = "---\nid: eng-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/1\nstatus: new\n---\n";
+        // gap-detect will detect comp_low as a gap; supply gaps payload directly.
+        let gaps_payload = serde_json::to_string(&ResearchGapsPayload {
+            slug: slug.to_string(),
+            gaps: vec!["comp_low".to_string()],
+        }).unwrap();
+        let (dir, vault, run_id, q) = enqueue_stage("research-gaps", "llm", slug, &gaps_payload, stub);
+
+        let llm = FakeLlm {
+            reply: r#"[{"field":"comp_low","value":"180000","source":"https://levels.fyi/comp_low","confidence":"low"}]"#.into(),
+            cost_micro_usd: 5_000,
+        };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let text = std::fs::read_to_string(dir.join(format!("jobs/{slug}.md"))).unwrap();
+        let j = crate::job::parse_job(slug, &text).unwrap();
+        assert_eq!(j.comp_low, Some(180000), "comp_low must be written");
+        assert!(j.researched.contains(&"comp_low".to_string()), "comp_low must appear in researched");
+
+        // ## Research notes must contain the value and source.
+        assert!(text.contains("## Research notes"), "## Research notes section required");
+        assert!(text.contains("comp_low"), "Research notes must mention comp_low");
+        assert!(text.contains("levels.fyi"), "Research notes must mention the source");
+
+        // Step status must be "ok" (no rejections).
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let step = run.steps.iter().find(|s| s.stage == "research-gaps").expect("research-gaps step");
+        assert_eq!(step.status, "ok");
+        assert_eq!(step.warnings, Vec::<String>::new());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Test 2: list fill (array field).
+    /// `countries` gap; FakeLlm returns `countries` as a JSON array.
+    /// After pumping: `job.countries` is set to the array.
+    #[test]
+    fn research_gaps_list_fill() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let slug = "eng-beta";
+        let stub = "---\nid: eng-beta\ntitle: \"Engineer\"\ncompany: \"[[beta]]\"\nurl: https://beta.com/jobs/1\nstatus: new\n---\n";
+        let gaps_payload = serde_json::to_string(&ResearchGapsPayload {
+            slug: slug.to_string(),
+            gaps: vec!["countries".to_string()],
+        }).unwrap();
+        let (dir, vault, _run_id, q) = enqueue_stage("research-gaps", "llm", slug, &gaps_payload, stub);
+
+        let llm = FakeLlm {
+            reply: r#"[{"field":"countries","value":["US","CA"],"source":"https://beta.com/careers","confidence":"high"}]"#.into(),
+            cost_micro_usd: 5_000,
+        };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let text = std::fs::read_to_string(dir.join(format!("jobs/{slug}.md"))).unwrap();
+        let j = crate::job::parse_job(slug, &text).unwrap();
+        assert_eq!(j.countries, vec!["US".to_string(), "CA".to_string()], "countries must be set to the array");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Test 3: mixed valid + invalid → WARNING step end-to-end.
+    /// FakeLlm returns one valid field + one invalid (out-of-set `remote` value).
+    /// Valid field is written; invalid is NOT; step status is "warning"; rejection in notes.
+    #[test]
+    fn research_gaps_mixed_valid_invalid_warning_step() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let slug = "eng-gamma";
+        let stub = "---\nid: eng-gamma\ntitle: \"Engineer\"\ncompany: \"[[gamma]]\"\nurl: https://gamma.com/jobs/1\nstatus: new\n---\n";
+        let gaps_payload = serde_json::to_string(&ResearchGapsPayload {
+            slug: slug.to_string(),
+            gaps: vec!["comp_low".to_string(), "remote".to_string()],
+        }).unwrap();
+        let (dir, vault, run_id, q) = enqueue_stage("research-gaps", "llm", slug, &gaps_payload, stub);
+
+        // comp_low = valid; remote = "flex" (not in allowed set → rejection)
+        let llm = FakeLlm {
+            reply: r#"[
+                {"field":"comp_low","value":"150000","source":"https://levels.fyi/gamma","confidence":"low"},
+                {"field":"remote","value":"flex","source":"https://gamma.com/jobs/1","confidence":"high"}
+            ]"#.into(),
+            cost_micro_usd: 8_000,
+        };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let text = std::fs::read_to_string(dir.join(format!("jobs/{slug}.md"))).unwrap();
+        let j = crate::job::parse_job(slug, &text).unwrap();
+
+        // Valid field must be written.
+        assert_eq!(j.comp_low, Some(150000), "comp_low must be written");
+        // Invalid field must NOT be written (remote stays None).
+        assert_eq!(j.remote, None, "invalid remote value must not be written");
+
+        // Step status must be "warning" with rejection in warnings.
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let step = run.steps.iter().find(|s| s.stage == "research-gaps").expect("research-gaps step");
+        assert_eq!(step.status, "warning", "step status must be 'warning' on partial rejection");
+        assert!(!step.warnings.is_empty(), "warnings must be non-empty");
+        assert!(
+            step.warnings.iter().any(|w| w.contains("remote")),
+            "rejection for 'remote' must appear in warnings; got: {:?}", step.warnings
+        );
+
+        // Rejection must appear in ## Research notes.
+        assert!(text.contains("## Research notes"), "## Research notes section required");
+        assert!(
+            text.contains("rejected"),
+            "rejection must appear in Research notes; text:\n{text}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Test 5 (D3): a REAL write `Err` during research-gaps is a HARD FAILURE — not a silent swallow.
+    /// We make the job note file read-only so `note::write_note` (→ `std::fs::write`) fails with a
+    /// real IO error. The step must end "failed" (not "ok"/"warning"); the recorded error must name
+    /// the field AND pass through the verbatim underlying error; `## Research notes` must NOT list the
+    /// failed field as Accepted; and fit-score must NOT have been enqueued for that target.
+    #[test]
+    #[cfg(unix)]
+    fn research_gaps_write_failure_is_hard_failure() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+        use std::os::unix::fs::PermissionsExt;
+
+        let slug = "eng-delta";
+        let stub = "---\nid: eng-delta\ntitle: \"Engineer\"\ncompany: \"[[delta]]\"\nurl: https://delta.com/jobs/1\nstatus: new\n---\n";
+        let gaps_payload = serde_json::to_string(&ResearchGapsPayload {
+            slug: slug.to_string(),
+            gaps: vec!["comp_low".to_string()],
+        }).unwrap();
+        let (dir, vault, run_id, q) = enqueue_stage("research-gaps", "llm", slug, &gaps_payload, stub);
+
+        // A valid finding the LLM "returns" — the write itself is what we force to fail.
+        let llm = FakeLlm {
+            reply: r#"[{"field":"comp_low","value":"180000","source":"https://levels.fyi/delta","confidence":"low"}]"#.into(),
+            cost_micro_usd: 5_000,
+        };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+
+        // Force a deterministic, REAL write failure: make the job note read-only so the
+        // `std::fs::write` inside `note::write_note` fails with a genuine permission error.
+        let job_path = dir.join(format!("jobs/{slug}.md"));
+        let orig_perms = std::fs::metadata(&job_path).unwrap().permissions();
+        std::fs::set_permissions(&job_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        // Restore writability immediately so assertions can read and cleanup can remove the dir.
+        std::fs::set_permissions(&job_path, orig_perms).unwrap();
+
+        // The research-gaps step must be FAILED (not "ok", not "warning").
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let step = run
+            .steps
+            .iter()
+            .find(|s| s.stage == "research-gaps")
+            .expect("research-gaps step must be recorded");
+        assert_eq!(step.status, "failed", "write failure must mark the step 'failed', got {:?}", step.status);
+
+        // The error must be populated, NAME the field, and CONTAIN the verbatim underlying IO error.
+        let err = step.error.as_deref().unwrap_or("");
+        assert!(err.contains("comp_low"), "error must name the failed field; got: {err:?}");
+        // The real underlying error: `std::fs::write` on a read-only file → "Permission denied".
+        assert!(
+            err.contains("Permission denied"),
+            "error must pass through the verbatim underlying message; got: {err:?}"
+        );
+        // The LLM cost is still recorded on the failed step (the call already happened).
+        assert_eq!(step.cost, Some(5_000), "LLM cost must be recorded on the failed step");
+
+        // `## Research notes` must NOT claim the failed field was Accepted. (Either no section was
+        // written, or it exists without an Accepted entry for the failed field.)
+        let text = std::fs::read_to_string(&job_path).unwrap();
+        assert!(
+            !text.contains("**Accepted**"),
+            "a failed write must not render an Accepted block; text:\n{text}"
+        );
+
+        // fit-score must NOT have been enqueued for this target (the arm returned Err before success).
+        assert_eq!(
+            q.pending_count().unwrap(),
+            0,
+            "no successor (fit-score) may be enqueued when the write failed"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Test 4: gap-detect with no gaps → enqueues fit-score (no research-gaps occurs).
+    /// A fully-populated job; gap-detect enqueues fit-score directly; research-gaps not called.
+    #[test]
+    fn gap_detect_no_gaps_enqueues_fit_score() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let slug = "eng-full";
+        // A stub with all researchable fields populated so detect_gaps returns empty.
+        let stub = "---\nid: eng-full\ntitle: \"Engineer\"\ncompany: \"[[full]]\"\nurl: https://full.com/jobs/1\nstatus: new\ncomp_low: 150000\ncomp_high: 200000\ncomp_currency: USD\ncomp_period: annual\ncomp_equity: 0.1-0.5%\nremote: remote\nlocation_constraints: US only\nvisa_sponsorship: offered\nrelocation: not_offered\nemployment_type: full_time\nyoe_min: 5\ntech_stack: [Rust]\nreports_to: CTO\nteam: Platform\ncountries: [US]\n---\n";
+        let (dir, vault, run_id, q) = enqueue_stage("gap-detect", "script", slug, "{}", stub);
+
+        // LLM should NOT be called at all (gap-detect is a script stage and with no gaps,
+        // it enqueues fit-score which is unknown and causes drain to stop without LLM).
+        let llm = FakeLlm { reply: "should-not-be-called".into(), cost_micro_usd: 0 };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        // gap-detect step must be recorded as "ok".
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let gd_step = run.steps.iter().find(|s| s.stage == "gap-detect").expect("gap-detect step");
+        assert_eq!(gd_step.status, "ok");
+        // research-gaps step must NOT have been recorded.
+        assert!(
+            !run.steps.iter().any(|s| s.stage == "research-gaps"),
+            "research-gaps must not run when no gaps detected"
+        );
+
         std::fs::remove_dir_all(&dir).ok();
     }
 }
