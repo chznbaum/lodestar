@@ -70,14 +70,17 @@ impl EventSink for NoopSink {
 /// Write `last_checked = <today>` on the target company note. Ignores errors (logs them) so a
 /// failed write never aborts the run. Today is derived from the first 10 chars of `run_id`
 /// (the date-prefix `YYYY-MM-DD`).
-fn stamp_checked(vault_path: &str, company_slug: &str, today: &str) {
-    if let Err(e) = crate::company::update_company_field(
+/// Stamp `last_checked` on the company note. Returns `Some(warning)` if the write failed, so the
+/// caller surfaces it as a step warning rather than dropping it to stderr.
+fn stamp_checked(vault_path: &str, company_slug: &str, today: &str) -> Option<String> {
+    match crate::company::update_company_field(
         vault_path.to_string(),
         company_slug.to_string(),
         "last_checked".to_string(),
         today.to_string(),
     ) {
-        eprintln!("stamp_checked({company_slug}): {e}");
+        Ok(_) => None,
+        Err(e) => Some(format!("last_checked: stamp failed for {company_slug}: {e}")),
     }
 }
 
@@ -256,6 +259,14 @@ fn fail_run(
     sink: &dyn EventSink,
 ) {
     if let Ok(mut run) = get_check(vault_path.to_string(), run_id.to_string()) {
+        // Stamp last_checked first (job_check only — target is a company slug) so a stamp failure
+        // can ride along on the run as a warning rather than an eprintln-only drop.
+        let stamp_warning = if run.kind == "job_check" {
+            let today = run_id.get(..10).unwrap_or(run_id);
+            stamp_checked(vault_path, target, today)
+        } else {
+            None
+        };
         // Find the last failed step for this stage (written by run_scrape_step) and annotate
         // it with the human-readable reason. If none exists (defensive), append one in-memory
         // rather than writing a second disk record.
@@ -263,6 +274,9 @@ fn fail_run(
             .rfind(|s| s.stage == stage && s.status == "failed")
         {
             step.error = Some(error_msg.to_string());
+            if let Some(w) = stamp_warning {
+                step.warnings.push(w);
+            }
         } else {
             run.steps.push(crate::check::Step {
                 stage: stage.to_string(),
@@ -274,24 +288,141 @@ fn fail_run(
                 finished_at: Some(now_iso()),
                 error: Some(error_msg.to_string()),
                 cost: None,
-                warnings: vec![],
+                warnings: stamp_warning.into_iter().collect(),
             });
         }
         run.status = "failed".into();
         run.errors += 1;
         run.finished_at = Some(now_iso());
-        // Only stamp last_checked on job_check runs (target is a company slug).
-        let kind = run.kind.clone();
         let _ = write_check(vault_path, &run);
-        if kind == "job_check" {
-            let today = run_id.get(..10).unwrap_or(run_id);
-            stamp_checked(vault_path, target, today);
-        }
     }
     // NOTE: if get_check fails we cannot determine the run kind, so we do NOT stamp.
     // Corruption of a job note (wrong kind stamped as a company) is worse than missing a stamp.
     eprintln!("run {run_id} failed: {error_msg}");
     sink.run_finished(run_id, "failed");
+}
+
+/// The shared core every stage class funnels its failures into — what `pump_once` does with a
+/// failed step. Per-class failure types (scrape's `FailureClass`, `LlmFailure`, `ScriptFailure`)
+/// each map to one of these, so `pump_once` matches only here and a new stage class never changes
+/// the retry/terminal machinery.
+#[derive(Debug)]
+enum Disposition {
+    /// Kill the task and fail the run. No retry, no further spend.
+    Terminal,
+    /// Bounded retry of the SAME task, capped at `max_attempts` (the cap is per stage class).
+    Retry { max_attempts: u32 },
+    /// Kill the current task and enqueue ONE modified successor (fix-encoding / proxy-escalation).
+    ReenqueueOnce { next: NewTask },
+}
+
+/// Apply a resolved disposition: the queue bookkeeping plus, on a terminal / retry-exhausted
+/// failure, the run-fail telemetry via `fail_run` (which stamps `last_checked` for `job_check`
+/// runs only). Shared by the scrape and non-scrape branches of `pump_once`.
+fn apply_disposition(
+    disposition: Disposition,
+    task: &QueuedTask,
+    reason: &str,
+    queue: &dyn Queue,
+    vault_path: &str,
+    sink: &dyn EventSink,
+) -> Result<(), String> {
+    match disposition {
+        Disposition::Terminal => {
+            queue.kill(task.id, reason)?;
+            fail_run(vault_path, &task.run_id, &task.target, &task.stage, reason, sink);
+        }
+        Disposition::Retry { max_attempts } => {
+            if task.attempts >= max_attempts {
+                queue.kill(task.id, reason)?;
+                fail_run(vault_path, &task.run_id, &task.target, &task.stage, reason, sink);
+            } else {
+                queue.fail(task.id, reason)?;
+            }
+        }
+        Disposition::ReenqueueOnce { next } => {
+            queue.kill(task.id, reason)?;
+            queue.enqueue(next)?;
+        }
+    }
+    Ok(())
+}
+
+/// An LLM stage's failure modes (structure-listings, structure-jd, research-gaps).
+#[derive(Debug)]
+enum LlmFailure {
+    /// Provider/network call failed — transient, retry.
+    Call(String),
+    /// The model's response couldn't be parsed — deterministic; retrying the same prompt wastes
+    /// spend, so terminal.
+    Parse(String),
+    /// A vault write failed after the (paid) call succeeded — deterministic IO/validation; terminal.
+    Write(String),
+}
+impl LlmFailure {
+    fn disposition(&self) -> Disposition {
+        match self {
+            LlmFailure::Call(_) => Disposition::Retry { max_attempts: MAX_ATTEMPTS },
+            LlmFailure::Parse(_) | LlmFailure::Write(_) => Disposition::Terminal,
+        }
+    }
+    fn reason(&self) -> &str {
+        match self {
+            LlmFailure::Call(s) | LlmFailure::Parse(s) | LlmFailure::Write(s) => s,
+        }
+    }
+}
+
+/// A script stage's failure modes (finalize, gap-detect). Deterministic — terminal today.
+/// A future LLM-review-of-a-script-failure remedy would add a variant here (and a `Disposition`).
+#[derive(Debug)]
+enum ScriptFailure {
+    Failed(String),
+}
+impl ScriptFailure {
+    fn disposition(&self) -> Disposition {
+        Disposition::Terminal
+    }
+    fn reason(&self) -> &str {
+        match self {
+            ScriptFailure::Failed(s) => s,
+        }
+    }
+}
+
+/// The non-scrape error channel: a stage's typed per-class failure, plus a generic `Step` bucket
+/// for incidental deterministic errors (note read, payload decode) any stage can hit. `pump_once`
+/// only ever asks for `disposition()` / `reason()`.
+#[derive(Debug)]
+enum StepFailure {
+    Llm(LlmFailure),
+    #[allow(dead_code)] // constructed once script stages classify their own failures
+    Script(ScriptFailure),
+    /// Class-agnostic deterministic step error — terminal.
+    Step(String),
+}
+impl StepFailure {
+    fn disposition(&self) -> Disposition {
+        match self {
+            StepFailure::Llm(f) => f.disposition(),
+            StepFailure::Script(f) => f.disposition(),
+            StepFailure::Step(_) => Disposition::Terminal,
+        }
+    }
+    fn reason(&self) -> &str {
+        match self {
+            StepFailure::Llm(f) => f.reason(),
+            StepFailure::Script(f) => f.reason(),
+            StepFailure::Step(s) => s,
+        }
+    }
+}
+/// Incidental `?`-propagated String errors (reads, payload decode, …) are deterministic step
+/// failures → terminal. Lets the existing `?` sites in `dispatch_non_scrape` work unchanged.
+impl From<String> for StepFailure {
+    fn from(s: String) -> Self {
+        StepFailure::Step(s)
+    }
 }
 
 /// Claim and execute at most one queued task. Returns `Ok(true)` if a task was processed,
@@ -387,7 +518,8 @@ pub fn pump_once<S: Scraper, L: Llm>(
             }
             Err(scrape_err) => {
                 sink.step_done(&task.run_id, &task.stage, "failed");
-                match scrape_err.class {
+                // Map scrape's FailureClass into the shared Disposition, then apply uniformly.
+                let (disposition, reason): (Disposition, String) = match scrape_err.class {
                     FailureClass::Terminal => {
                         // Page is gone (or API key missing) — no retry, no escalation, no spend.
                         let reason = match scrape_err.status {
@@ -408,15 +540,12 @@ pub fn pump_once<S: Scraper, L: Llm>(
                                 }
                             }
                         };
-                        queue.kill(task.id, &reason)?;
-                        fail_run(vault_path, &task.run_id, &task.target, &task.stage, &reason, sink);
+                        (Disposition::Terminal, reason)
                     }
                     FailureClass::FixEncoding => {
                         if p.encoding_fixed {
                             // Already re-issued with encoded URL — still failing. Give up.
-                            let reason = "url encoding fix did not resolve the error";
-                            queue.kill(task.id, reason)?;
-                            fail_run(vault_path, &task.run_id, &task.target, &task.stage, reason, sink);
+                            (Disposition::Terminal, "url encoding fix did not resolve the error".to_string())
                         } else {
                             // Re-issue once with RFC-3986-percent-encoded URL.
                             let fixed_url = percent_encode_target_url(&p.careers_url);
@@ -426,22 +555,24 @@ pub fn pump_once<S: Scraper, L: Llm>(
                                 encoding_fixed: true,
                             })
                             .map_err(|e| e.to_string())?;
-                            queue.kill(task.id, "re-issuing with encoded url")?;
-                            queue.enqueue(NewTask {
-                                run_id: task.run_id.clone(),
-                                stage: task.stage.clone(), // re-enqueue as the SAME stage
-                                class: "scrape".into(),
-                                target: task.target.clone(),
-                                payload: new_payload,
-                            })?;
+                            (
+                                Disposition::ReenqueueOnce {
+                                    next: NewTask {
+                                        run_id: task.run_id.clone(),
+                                        stage: task.stage.clone(), // re-enqueue as the SAME stage
+                                        class: "scrape".into(),
+                                        target: task.target.clone(),
+                                        payload: new_payload,
+                                    },
+                                },
+                                "re-issuing with encoded url".to_string(),
+                            )
                         }
                     }
                     FailureClass::EscalateProxy => {
                         if p.tier == "stealth" {
                             // Already escalated to Stealth — still blocked. Give up.
-                            let reason = "blocked — escalated to stealth, still failed";
-                            queue.kill(task.id, reason)?;
-                            fail_run(vault_path, &task.run_id, &task.target, &task.stage, reason, sink);
+                            (Disposition::Terminal, "blocked — escalated to stealth, still failed".to_string())
                         } else {
                             // Re-enqueue once with Stealth tier.
                             let new_payload = serde_json::to_string(&ScrapePayload {
@@ -450,31 +581,29 @@ pub fn pump_once<S: Scraper, L: Llm>(
                                 encoding_fixed: p.encoding_fixed,
                             })
                             .map_err(|e| e.to_string())?;
-                            queue.kill(task.id, "escalating to stealth proxy")?;
-                            queue.enqueue(NewTask {
-                                run_id: task.run_id.clone(),
-                                stage: task.stage.clone(), // re-enqueue as the SAME stage
-                                class: "scrape".into(),
-                                target: task.target.clone(),
-                                payload: new_payload,
-                            })?;
+                            (
+                                Disposition::ReenqueueOnce {
+                                    next: NewTask {
+                                        run_id: task.run_id.clone(),
+                                        stage: task.stage.clone(), // re-enqueue as the SAME stage
+                                        class: "scrape".into(),
+                                        target: task.target.clone(),
+                                        payload: new_payload,
+                                    },
+                                },
+                                "escalating to stealth proxy".to_string(),
+                            )
                         }
                     }
                     FailureClass::Transient => {
                         // Bounded backoff retry, capped at TRANSIENT_SCRAPE_MAX_ATTEMPTS.
-                        let err_str = scrape_err.to_string();
-                        if task.attempts >= TRANSIENT_SCRAPE_MAX_ATTEMPTS {
-                            queue.kill(task.id, &err_str)?;
-                            fail_run(
-                                vault_path, &task.run_id, &task.target, &task.stage,
-                                &format!("transient scrape error after {TRANSIENT_SCRAPE_MAX_ATTEMPTS} attempts: {err_str}"),
-                                sink,
-                            );
-                        } else {
-                            queue.fail(task.id, &err_str)?;
-                        }
+                        (
+                            Disposition::Retry { max_attempts: TRANSIENT_SCRAPE_MAX_ATTEMPTS },
+                            scrape_err.to_string(),
+                        )
                     }
-                }
+                };
+                apply_disposition(disposition, &task, &reason, queue, vault_path, sink)?;
             }
         }
         return Ok(true);
@@ -494,28 +623,11 @@ pub fn pump_once<S: Scraper, L: Llm>(
                 sink.run_finished(&task.run_id, "complete");
             }
         }
-        Err(e) => {
-            queue.fail(task.id, &e)?;
+        Err(failure) => {
             sink.step_done(&task.run_id, &task.stage, "failed");
-            // Terminal failure (retries exhausted): the chain can't proceed — mark the run failed
-            // so it doesn't sit "running" forever.
-            if task.attempts >= MAX_ATTEMPTS {
-                // Update the check note if it can be loaded (legitimately needs the loaded check).
-                if let Ok(mut run) = get_check(vault_path.to_string(), task.run_id.clone()) {
-                    run.status = "failed".into();
-                    run.errors += 1;
-                    run.finished_at = Some(now_iso());
-                    let _ = write_check(vault_path, &run);
-                    // Only stamp last_checked for job_check runs (target is a company slug).
-                    // For job_detail runs, target is a job slug — stamping would corrupt/create
-                    // a wrong company note.
-                    if run.kind == "job_check" {
-                        let today = task.run_id.get(..10).unwrap_or(&task.run_id);
-                        stamp_checked(vault_path, &task.target, today);
-                    }
-                }
-                sink.run_finished(&task.run_id, "failed");
-            }
+            // Per-class disposition: LLM-call failures retry; parse/write, script, and incidental
+            // errors are terminal — re-calling the LLM can't fix a deterministic failure.
+            apply_disposition(failure.disposition(), &task, failure.reason(), queue, vault_path, sink)?;
         }
     }
     Ok(true)
@@ -529,7 +641,7 @@ fn dispatch_non_scrape<L: Llm>(
     vault_path: &str,
     cfg: &PipelineConfig,
     llm: &L,
-) -> Result<Vec<NewTask>, String> {
+) -> Result<Vec<NewTask>, StepFailure> {
     let run_id = task.run_id.as_str();
     let company = task.target.as_str();
     match task.stage.as_str() {
@@ -549,13 +661,13 @@ fn dispatch_non_scrape<L: Llm>(
                         }
                         Err(e) => {
                             record_step(vault_path, run_id, "structure-listings", "llm", company, started, "failed", Some(e.clone()), cost)?;
-                            return Err(e);
+                            return Err(StepFailure::Llm(LlmFailure::Parse(e)));
                         }
                     }
                 }
                 Err(e) => {
                     record_step(vault_path, run_id, "structure-listings", "llm", company, started, "failed", Some(e.clone()), None)?;
-                    return Err(e);
+                    return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
             };
             Ok(vec![NewTask {
@@ -593,6 +705,11 @@ fn dispatch_non_scrape<L: Llm>(
                 .collect();
             record_step(vault_path, run_id, "pre-filter", "script", company, started, "ok", None, None)?;
 
+            // Track stub writes: a failed write is surfaced as a visible warning (never eprintln-
+            // only), and roles_found counts what was actually written.
+            let finalize_started = now_iso();
+            let mut stub_warnings: Vec<String> = Vec::new();
+            let mut written: u32 = 0;
             for listing in &selected {
                 let validated_level = listing.level.as_deref()
                     .and_then(|v| if crate::job::VALID_LEVELS.contains(&v) { Some(v.to_string()) } else { None });
@@ -634,17 +751,29 @@ fn dispatch_non_scrape<L: Llm>(
                     jd_raw_file: None,
                     jd_fetched: false,
                 };
-                if let Err(e) = write_job_stub(vault_path, &job) {
-                    eprintln!("failed to write stub {}: {e}", job.slug);
+                match write_job_stub(vault_path, &job) {
+                    Ok(_) => written += 1,
+                    Err(e) => {
+                        stub_warnings.push(format!("{}: stub write failed (skipped): {e}", job.slug))
+                    }
                 }
             }
-
             let mut run = get_check(vault_path.to_string(), run_id.to_string())?;
-            run.roles_found = selected.len() as u32;
+            run.roles_found = written;
             run.status = "complete".into();
             run.finished_at = Some(now_iso());
             write_check(vault_path, &run)?;
-            stamp_checked(vault_path, company, today);
+            // Stamp last_checked; fold a stamp failure into the finalize warnings (not eprintln).
+            if let Some(w) = stamp_checked(vault_path, company, today) {
+                stub_warnings.push(w);
+            }
+            // Surface skipped stubs and/or a stamp failure as a visible "finalize" warning step.
+            if !stub_warnings.is_empty() {
+                record_step_warned(
+                    vault_path, run_id, "finalize", "script", company, finalize_started,
+                    stub_warnings, None,
+                )?;
+            }
             Ok(vec![])
         }
         "structure-jd" => {
@@ -658,16 +787,20 @@ fn dispatch_non_scrape<L: Llm>(
                     Ok(jd) => (jd, r.cost_micro_usd),
                     Err(e) => {
                         record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "failed", Some(e.clone()), r.cost_micro_usd)?;
-                        return Err(e);
+                        return Err(StepFailure::Llm(LlmFailure::Parse(e)));
                     }
                 },
                 Err(e) => {
                     record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "failed", Some(e.clone()), None)?;
-                    return Err(e);
+                    return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
             };
-            write_jd_fields(vault_path, &p.slug, &jd)?;
-            record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "ok", None, cost)?;
+            let warnings = write_jd_fields(vault_path, &p.slug, &jd)?;
+            if warnings.is_empty() {
+                record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "ok", None, cost)?;
+            } else {
+                record_step_warned(vault_path, run_id, "structure-jd", "llm", &p.slug, started, warnings, cost)?;
+            }
             Ok(vec![NewTask {
                 run_id: run_id.into(),
                 stage: "gap-detect".into(),
@@ -734,7 +867,7 @@ fn dispatch_non_scrape<L: Llm>(
                         vault_path, run_id, "research-gaps", "llm", slug, started,
                         "failed", Some(e.clone()), None,
                     )?;
-                    return Err(e);
+                    return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
             };
             let cost = resp.cost_micro_usd;
@@ -747,7 +880,7 @@ fn dispatch_non_scrape<L: Llm>(
                         vault_path, run_id, "research-gaps", "llm", slug, started,
                         "failed", Some(e.clone()), cost,
                     )?;
-                    return Err(e);
+                    return Err(StepFailure::Llm(LlmFailure::Parse(e)));
                 }
             };
 
@@ -786,7 +919,7 @@ fn dispatch_non_scrape<L: Llm>(
                         vault_path, run_id, "research-gaps", "llm", slug, started,
                         "failed", Some(msg.clone()), cost,
                     )?;
-                    return Err(msg);
+                    return Err(StepFailure::Llm(LlmFailure::Write(msg)));
                 }
                 written.push(w);
             }
@@ -864,7 +997,7 @@ fn dispatch_non_scrape<L: Llm>(
                 payload: "{}".into(),
             }])
         }
-        other => Err(format!("unknown stage: {other}")),
+        other => Err(StepFailure::Step(format!("unknown stage: {other}"))),
     }
 }
 
@@ -873,20 +1006,28 @@ fn dispatch_non_scrape<L: Llm>(
 /// against their constant sets; invalid values are skipped with a warning so that one stray
 /// LLM output value doesn't fail the entire stage. List fields use `set_job_list_field`.
 /// Assembles and writes the candidate-brief `## JD — structured` body section.
-fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<(), String> {
+fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<Vec<String>, String> {
+    // Off-set enum values are skipped (not written) and collected here so the caller can record
+    // them as a visible "warning" step — never an eprintln-only silent drop.
+    let mut warnings: Vec<String> = Vec::new();
+
     // Helper: write a scalar field, propagating real IO errors but skipping invalid enum values.
     let write_scalar = |field: &str, value: &str| -> Result<(), String> {
         update_job_field(vault_path.to_string(), slug.to_string(), field.into(), value.into())
     };
 
-    // Enum-constrained fields: pre-validate, skip + warn on bad value, propagate IO errors.
+    // Enum-constrained fields: pre-validate, skip + record a visible warning on a bad value,
+    // propagate IO errors.
     macro_rules! write_enum {
         ($field:expr, $value:expr, $allowed:expr) => {
             if let Some(v) = $value.as_deref() {
                 if $allowed.contains(&v) {
                     write_scalar($field, v)?;
                 } else {
-                    eprintln!("structure-jd: invalid {field:?} value {v:?} (skipped)", field = $field);
+                    warnings.push(format!(
+                        "{}: value {:?} not in allowed set (skipped)",
+                        $field, v
+                    ));
                 }
             }
         };
@@ -934,7 +1075,7 @@ fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<()
         let metros = match crate::metro::list_metros(vault_path) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("structure-jd: could not load metros (skipping resolution): {e}");
+                warnings.push(format!("metros: could not load (location resolution skipped): {e}"));
                 vec![]
             }
         };
@@ -975,7 +1116,7 @@ fn write_jd_fields(vault_path: &str, slug: &str, jd: &StructuredJd) -> Result<()
         set_job_section(vault_path, slug, "## JD — structured", &brief)?;
     }
 
-    Ok(())
+    Ok(warnings)
 }
 
 #[cfg(test)]
@@ -1400,6 +1541,253 @@ mod tests {
             "jd_raw_file must be written at jobs/_jd/senior-engineer-acme.md");
         // run_id must be a valid run id string.
         assert!(!run_id.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// F2: an off-set enum value from the LLM must be SKIPPED *and* surfaced as a visible
+    /// warning on the structure-jd step — not dropped via eprintln with the step still "ok".
+    #[test]
+    fn structure_jd_records_warning_step_when_field_skipped() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let dir = job_detail_fixture_vault();
+        let vault = dir.to_str().unwrap();
+        let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-19").unwrap();
+
+        let scraper = FakeScraper { content: "<p>JD</p>".into(), credits: 5 };
+        // "flexible" ∉ REMOTE_KINDS → must be skipped and reported as a warning.
+        let llm = FakeLlm {
+            reply: r#"{"comp_low":180000,"remote":"flexible","role_brief":"Build platform."}"#.into(),
+            cost_micro_usd: 1000,
+        };
+        let cfg = default_config();
+        let sink = NoopSink;
+        let never = |_: &str| false;
+        while pump_once(&queue, vault, &cfg, &scraper, &llm, &sink, &never).unwrap() {}
+
+        let run = get_check(vault.to_string(), run_id).unwrap();
+        let step = run
+            .steps
+            .iter()
+            .find(|s| s.stage == "structure-jd")
+            .expect("structure-jd step must be recorded");
+        assert_eq!(step.status, "warning", "off-set enum must make the step a warning, not ok");
+        assert!(
+            step.warnings.iter().any(|w| w.contains("remote")),
+            "skipped field must be named in the step warnings; got {:?}",
+            step.warnings
+        );
+
+        let j = crate::job::parse_job(
+            "senior-engineer-acme",
+            &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(j.remote, None, "off-set remote must be skipped (unwritten)");
+        assert_eq!(j.comp_low, Some(180000), "valid fields still written");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// F1: a deterministic write failure is TERMINAL — the expensive llm+web stage runs EXACTLY
+    /// ONCE, never retried MAX_ATTEMPTS times (re-calling the web LLM on a disk error is pure
+    /// wasted spend). Observable via the recorded research-gaps step count.
+    #[test]
+    #[cfg(unix)]
+    fn research_gaps_write_failure_is_terminal_runs_once() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+        use std::os::unix::fs::PermissionsExt;
+
+        let slug = "eng-epsilon";
+        let stub = "---\nid: eng-epsilon\ntitle: \"Engineer\"\ncompany: \"[[epsilon]]\"\nurl: https://epsilon.com/jobs/1\nstatus: new\n---\n";
+        let gaps_payload = serde_json::to_string(&ResearchGapsPayload {
+            slug: slug.to_string(),
+            gaps: vec!["comp_low".to_string()],
+        })
+        .unwrap();
+        let (dir, vault, run_id, q) = enqueue_stage("research-gaps", "llm", slug, &gaps_payload, stub);
+
+        let llm = FakeLlm {
+            reply: r#"[{"field":"comp_low","value":"180000","source":"https://levels.fyi/x","confidence":"low"}]"#.into(),
+            cost_micro_usd: 5_000,
+        };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+
+        let job_path = dir.join(format!("jobs/{slug}.md"));
+        let orig_perms = std::fs::metadata(&job_path).unwrap().permissions();
+        std::fs::set_permissions(&job_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        std::fs::set_permissions(&job_path, orig_perms).unwrap();
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let attempts = run.steps.iter().filter(|s| s.stage == "research-gaps").count();
+        assert_eq!(
+            attempts, 1,
+            "a write failure must be terminal (no llm re-run); got {attempts} research-gaps steps"
+        );
+        let step = run.steps.iter().find(|s| s.stage == "research-gaps").unwrap();
+        assert_eq!(step.status, "failed", "the single attempt is still recorded failed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// F1: a parse failure (malformed LLM response) is TERMINAL too — the web LLM is not re-called
+    /// hoping for run-to-run variance. Observable: exactly one (failed) research-gaps step.
+    #[test]
+    fn research_gaps_parse_failure_is_terminal_runs_once() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let slug = "eng-zeta";
+        let stub = "---\nid: eng-zeta\ntitle: \"Engineer\"\ncompany: \"[[zeta]]\"\nurl: https://zeta.com/jobs/1\nstatus: new\n---\n";
+        let gaps_payload = serde_json::to_string(&ResearchGapsPayload {
+            slug: slug.to_string(),
+            gaps: vec!["comp_low".to_string()],
+        })
+        .unwrap();
+        let (dir, vault, run_id, q) = enqueue_stage("research-gaps", "llm", slug, &gaps_payload, stub);
+
+        // A JSON object, not the required array → parse_and_validate_research returns Err.
+        let llm = FakeLlm {
+            reply: r#"{"field":"comp_low","value":"180000"}"#.into(),
+            cost_micro_usd: 5_000,
+        };
+        let scraper = FakeScraper { content: String::new(), credits: 0 };
+        let cfg = default_config();
+
+        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let steps: Vec<_> = run.steps.iter().filter(|s| s.stage == "research-gaps").collect();
+        assert_eq!(steps.len(), 1, "a parse failure must be terminal (no llm re-run); got {}", steps.len());
+        assert_eq!(steps[0].status, "failed", "parse failure must mark the step failed (not an empty-array success)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A failed job-stub write in `finalize` must surface as a visible `"finalize"` warning step
+    /// (not eprintln-only), and `roles_found` must count actually-written stubs, not selected ones.
+    #[test]
+    #[cfg(unix)]
+    fn finalize_stub_write_failure_is_a_visible_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, vault) = setup_vault();
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: Acme\nstatus: active\n---\n",
+        )
+        .unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
+        let llm = AlwaysOkLlm { reply: two_listings() };
+
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-19").unwrap();
+
+        // Make jobs/ read-only so write_job_stub fails with a genuine permission error.
+        let jobs_dir = dir.join("jobs");
+        let orig = std::fs::metadata(&jobs_dir).unwrap().permissions();
+        std::fs::set_permissions(&jobs_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        drain(&q, &vault, &scraper, &llm);
+
+        std::fs::set_permissions(&jobs_dir, orig).unwrap();
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let finalize = run
+            .steps
+            .iter()
+            .find(|s| s.stage == "finalize")
+            .expect("a finalize warning step must be recorded when a stub write fails");
+        assert_eq!(finalize.status, "warning", "a skipped stub write must make finalize a warning");
+        assert!(
+            finalize.warnings.iter().any(|w| w.contains("senior")),
+            "the skipped stub slug must be named in warnings; got {:?}",
+            finalize.warnings
+        );
+        assert_eq!(run.roles_found, 0, "roles_found must count written stubs (0), not selected");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Metros are seeded, so a *load failure* (not the missing-dir graceful case) is a real anomaly
+    /// — it must surface as a structure-jd warning, not an eprintln-only drop.
+    #[test]
+    #[cfg(unix)]
+    fn structure_jd_metros_load_failure_is_a_visible_warning() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = job_detail_fixture_vault();
+        let vault = dir.to_str().unwrap();
+        // metros/ exists (seeded) but is unreadable → list_metros errors.
+        let metros_dir = dir.join("metros");
+        std::fs::create_dir_all(&metros_dir).unwrap();
+        let orig = std::fs::metadata(&metros_dir).unwrap().permissions();
+        std::fs::set_permissions(&metros_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-19").unwrap();
+        let scraper = FakeScraper { content: "<p>JD</p>".into(), credits: 5 };
+        let llm = FakeLlm {
+            reply: r#"{"role_brief":"Build platform.","locations":["San Francisco"]}"#.into(),
+            cost_micro_usd: 1000,
+        };
+        let cfg = default_config();
+        while pump_once(&queue, vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        std::fs::set_permissions(&metros_dir, orig).unwrap();
+
+        let run = get_check(vault.to_string(), run_id).unwrap();
+        let step = run.steps.iter().find(|s| s.stage == "structure-jd").expect("structure-jd step recorded");
+        assert_eq!(step.status, "warning", "a metros-load failure must make structure-jd a warning");
+        assert!(
+            step.warnings.iter().any(|w| w.contains("metros")),
+            "the metros-load failure must be named; got {:?}",
+            step.warnings
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A failed `last_checked` stamp (company-note write error) must surface as a warning, not
+    /// eprintln-only.
+    #[test]
+    #[cfg(unix)]
+    fn finalize_stamp_failure_is_a_visible_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (dir, vault) = setup_vault();
+        std::fs::create_dir_all(dir.join("companies")).unwrap();
+        let company_path = dir.join("companies/acme.md");
+        std::fs::write(&company_path, "---\nid: acme\nname: Acme\nstatus: active\n---\n").unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let scraper = CountingScraper { content: "<p>careers</p>".into(), credits: 5, calls: Cell::new(0) };
+        let llm = AlwaysOkLlm { reply: two_listings() };
+        let run_id = start_discovery(&q, &vault, "acme", "https://co/careers", "2026-06-19").unwrap();
+
+        // Read-only company note → the last_checked stamp write fails (stubs still write fine).
+        let orig = std::fs::metadata(&company_path).unwrap().permissions();
+        std::fs::set_permissions(&company_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        drain(&q, &vault, &scraper, &llm);
+
+        std::fs::set_permissions(&company_path, orig).unwrap();
+
+        let run = get_check(vault.clone(), run_id.clone()).unwrap();
+        let finalize = run
+            .steps
+            .iter()
+            .find(|s| s.stage == "finalize")
+            .expect("a finalize warning step must be recorded when the last_checked stamp fails");
+        assert!(
+            finalize.warnings.iter().any(|w| w.contains("last_checked")),
+            "stamp failure must be a visible warning; got {:?}",
+            finalize.warnings
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
