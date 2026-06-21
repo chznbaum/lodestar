@@ -18,6 +18,9 @@ pub struct Experience {
     pub remote: Option<bool>,
     pub competencies: Vec<String>,
     pub tagline: Option<String>,
+    /// The note body (everything after the frontmatter), trimmed. Carries the
+    /// `## Summary` / `## Progression` prose used as qualitative-alignment context.
+    pub body: String,
 }
 
 #[derive(Deserialize)]
@@ -40,7 +43,7 @@ fn nonempty(s: Option<String>) -> Option<String> {
 }
 
 fn parse_experience(slug: &str, text: &str) -> Result<Experience, String> {
-    let (fm, _) = split_frontmatter(text);
+    let (fm, body) = split_frontmatter(text);
     let f: Front = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
 
     let start_date = nonempty(f.start_date);
@@ -64,6 +67,7 @@ fn parse_experience(slug: &str, text: &str) -> Result<Experience, String> {
         remote: f.remote,
         competencies,
         tagline: nonempty(f.tagline),
+        body: body.trim().to_string(),
     })
 }
 
@@ -141,7 +145,20 @@ mod tests {
             remote: None,
             competencies: competencies.iter().map(|s| s.to_string()).collect(),
             tagline: None,
+            body: String::new(),
         }
+    }
+
+    // ── parse_experience body capture ──────────────────────────────────────────
+
+    #[test]
+    fn parse_experience_captures_note_body() {
+        let text = "---\ncompany: MAXX Potential\nrole_title: Site Lead\nstart_date: 2018-01\nend_date: 2022-01\n---\n## Summary\nLed a Norfolk office of 8 concurrent teams.\n\n## Progression\nApprentice → Site Lead.\n";
+        let exp = parse_experience("maxx-site-lead", text).unwrap();
+        assert_eq!(exp.role_title, "Site Lead");
+        assert!(exp.body.contains("## Summary"), "body missing Summary: {:?}", exp.body);
+        assert!(exp.body.contains("Led a Norfolk office of 8 concurrent teams."));
+        assert!(exp.body.contains("## Progression"));
     }
 
     // ── total_years_experience ────────────────────────────────────────────────

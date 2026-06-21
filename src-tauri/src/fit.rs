@@ -18,13 +18,13 @@ use crate::competency::CompetencyIndex;
 use crate::job::Job;
 use crate::profile::TargetCriteria;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FlagLevel {
     Dealbreaker,
     Caution,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Flag {
     pub check: String,
     pub level: FlagLevel,
@@ -51,7 +51,7 @@ fn caution(check: &str, detail: impl Into<String>) -> Flag {
 
 /// Output of `score_fit`: the five 0–1 sub-scores, the fired flags, and the
 /// combined 0–100 score (0 when any dealbreaker fires).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FitBreakdown {
     pub seniority: f64,
     pub skills: f64,

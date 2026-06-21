@@ -120,6 +120,35 @@ pub fn read_target_criteria(vault_path: &str) -> Result<TargetCriteria, String> 
     parse_target_criteria(&text)
 }
 
+/// `(slug, headline)` for every accomplishment note in `profile/accomplishments/`,
+/// stable-sorted by slug. The headline is the note's `headline:` frontmatter (empty when
+/// absent — the note stays citable by slug). Used as the citable evidence list for the
+/// qualitative `alignment` step.
+pub fn list_accomplishments(vault_path: &str) -> Result<Vec<(String, String)>, String> {
+    let dir = Path::new(vault_path).join("profile").join("accomplishments");
+    let mut out = crate::note::read_notes_in(&dir, |slug, text| {
+        #[derive(Deserialize)]
+        struct AccFront {
+            headline: Option<String>,
+        }
+        let (fm, _body) = split_frontmatter(text);
+        let f: AccFront = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
+        Ok((slug.to_string(), f.headline.unwrap_or_default().trim().to_string()))
+    })?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+/// The positioning narrative body (everything after the frontmatter) from
+/// `profile/positioning.md`, trimmed. The `type`/`status` frontmatter is dropped — only the
+/// narrative is useful as alignment context.
+pub fn read_positioning(vault_path: &str) -> Result<String, String> {
+    let p = Path::new(vault_path).join("profile").join("positioning.md");
+    let text = std::fs::read_to_string(&p).map_err(|e| format!("read {p:?}: {e}"))?;
+    let (_fm, body) = split_frontmatter(&text);
+    Ok(body.trim().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,6 +227,60 @@ mod tests {
             w.seniority + w.skills + w.comp + w.arrangement + w.domain
         );
         assert!(c.target_levels.is_empty()); // safe defaults
+    }
+
+    // ── list_accomplishments ───────────────────────────────────────────────────
+
+    #[test]
+    fn list_accomplishments_returns_sorted_slug_headline_pairs() {
+        let dir = std::env::temp_dir().join(format!("lodestar-acc-{}", std::process::id()));
+        let acc = dir.join("profile").join("accomplishments");
+        std::fs::create_dir_all(&acc).unwrap();
+        std::fs::write(
+            acc.join("zeta-win.md"),
+            "---\nid: zeta-win\nheadline: \"Shipped Zeta end to end.\"\ndemonstrates: [\"[[rust]]\"]\n---\nbody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            acc.join("alpha-win.md"),
+            "---\nid: alpha-win\nheadline: \"Cut infra spend 30%.\"\n---\nbody\n",
+        )
+        .unwrap();
+        let got = list_accomplishments(dir.to_str().unwrap()).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(
+            got,
+            vec![
+                ("alpha-win".to_string(), "Cut infra spend 30%.".to_string()),
+                ("zeta-win".to_string(), "Shipped Zeta end to end.".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_accomplishments_missing_dir_is_empty() {
+        let dir = std::env::temp_dir().join(format!("lodestar-acc-none-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(list_accomplishments(dir.to_str().unwrap()).unwrap().is_empty());
+    }
+
+    // ── read_positioning ────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_positioning_returns_body_without_frontmatter() {
+        let dir = std::env::temp_dir().join(format!("lodestar-pos-{}", std::process::id()));
+        let prof = dir.join("profile");
+        std::fs::create_dir_all(&prof).unwrap();
+        std::fs::write(
+            prof.join("positioning.md"),
+            "---\ntype: positioning\nstatus: draft\n---\n## Primary narrative\nI'm a founding engineer.\n",
+        )
+        .unwrap();
+        let body = read_positioning(dir.to_str().unwrap()).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(body.contains("## Primary narrative"));
+        assert!(body.contains("I'm a founding engineer."));
+        assert!(!body.contains("type: positioning"), "frontmatter leaked: {body}");
     }
 
     #[test]
