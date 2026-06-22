@@ -2,6 +2,22 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
+ * Canonical ordered stages for a `job_detail` run.
+ * `research-gaps` is conditional — it is skipped (marked "skipped" in the strip)
+ * when `gap-detect` finds no gaps and routes straight to `fit-score`.
+ */
+export const JOB_DETAIL_STAGES = [
+  "jd-scrape",
+  "structure-jd",
+  "gap-detect",
+  "research-gaps",
+  "fit-score",
+  "alignment",
+] as const;
+
+export type JobDetailStage = (typeof JOB_DETAIL_STAGES)[number];
+
+/**
  * Mirrors the Rust `FetchJobDetailsOutcome` from `start_job_detail_runs`.
  * Each bucket carries slugs that were started, skipped (already done), or failed to start.
  */

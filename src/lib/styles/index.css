@@ -24,6 +24,7 @@
 @import "./layout/app.css";
 @import "./layout/companies.css";
 @import "./layout/workspace.css";
+@import "./layout/roles.css";
 @import "./layout/create-form.css";
 @import "./layout/domain-picker.css";
 @import "./layout/checks.css";

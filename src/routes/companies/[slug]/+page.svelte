@@ -10,7 +10,10 @@
   import DomainPicker from "$lib/DomainPicker.svelte";
   import { listJobs, type Job } from "$lib/job";
   import { levelLabel } from "$lib/level";
-  import { fetchJobsForCompany, cancelRun, onRunStep, onRunFinished, phaseLabel } from "$lib/pipeline";
+  import { fetchJobsForCompany, fetchJobDetails, cancelRun, onRunStep, onRunFinished, phaseLabel, JOB_DETAIL_STAGES, type JobDetailStage } from "$lib/pipeline";
+  import { fitBand } from "$lib/fit";
+  import { sortRoles, outcomeBySlug } from "$lib/rolesView";
+  import { classifyStatus } from "$lib/jobStatus";
   import { getCheck } from "$lib/check";
   import { onRecordChanged } from "$lib/vaultSync";
 
@@ -109,6 +112,110 @@
   /** Live phase label during a run; result line when finished. Empty when idle. */
   let phase = $state("");
 
+  // ── Triage List: per-job fetch state machine ───────────
+  /** Stage status values used in the step strip. */
+  type StageStatus = "done" | "now" | "failed" | "skipped";
+
+  /** A job whose detail fetch is currently running. */
+  type RunStateRunning = {
+    status: "running";
+    runId: string;
+    phase: string;
+    stageStatus: Map<JobDetailStage, StageStatus>;
+  };
+  /** A job that was durably skipped (already running / already decided elsewhere). */
+  type RunStateSkipped = { status: "skipped"; detail: string };
+  /** A job that failed to start, or whose run ended in failure. */
+  type RunStateFailed = {
+    status: "failed";
+    failedStage: string | null;
+    detail: string;
+  };
+
+  type RunState = RunStateRunning | RunStateSkipped | RunStateFailed;
+
+  /**
+   * Per-slug fetch state. Populated from `fetchJobDetails` outcomes and updated live
+   * by `run:step` / `run:finished` events. Running entries are removed on `run:finished`.
+   */
+  let runBySlug = $state<Map<string, RunState>>(new Map());
+
+  /** Sorted roles for the Triage List (scored best-first, unscored by title). */
+  let sortedJobs = $derived(sortRoles(jobs));
+
+  /**
+   * Merge a `FetchJobDetailsOutcome` onto `prev`, translating each `SlugOutcome` into
+   * a `RunState`. Returns a NEW Map (so reassigning `runBySlug` triggers Svelte 5
+   * reactivity — never mutate in place).
+   *
+   * Distinguishes failed-to-start (from the outcome `failed` bucket) from a run that
+   * started then failed (handled in `run:finished`); both become `RunStateFailed` but
+   * their `detail` source differs.
+   */
+  function applyOutcome(
+    prev: Map<string, RunState>,
+    outcome: Awaited<ReturnType<typeof fetchJobDetails>>,
+  ): Map<string, RunState> {
+    const next = new Map(prev);
+    for (const [s, entry] of outcomeBySlug(outcome)) {
+      if (entry.kind === "started") {
+        next.set(s, {
+          status: "running",
+          runId: entry.runId,
+          phase: "Starting…",
+          stageStatus: new Map(),
+        });
+      } else if (entry.kind === "skipped") {
+        next.set(s, { status: "skipped", detail: entry.detail });
+      } else {
+        // failed-to-start
+        next.set(s, { status: "failed", failedStage: null, detail: entry.detail });
+      }
+    }
+    return next;
+  }
+
+  /** Fetch job details for the currently selected slugs. */
+  async function fetchSelected() {
+    if (!cs.vaultPath || selectedSlugs.length === 0) return;
+    const slugsToFetch = [...selectedSlugs];
+    // Clear selection immediately so the UI responds.
+    selectedSlugs = [];
+
+    let outcome: Awaited<ReturnType<typeof fetchJobDetails>>;
+    try {
+      outcome = await fetchJobDetails(cs.vaultPath, slugsToFetch);
+    } catch (e) {
+      // Failed to even start the call — mark all as failed-to-start.
+      const next = new Map(runBySlug);
+      for (const s of slugsToFetch) {
+        next.set(s, { status: "failed", failedStage: null, detail: String(e) });
+      }
+      runBySlug = next;
+      return;
+    }
+
+    runBySlug = applyOutcome(runBySlug, outcome);
+  }
+
+  /** Retry a single failed-to-start slug. */
+  async function retrySlug(slug: string) {
+    if (!cs.vaultPath) return;
+    const next = new Map(runBySlug);
+    next.delete(slug); // remove old failed entry so the row shows a spinner
+    runBySlug = next;
+    let outcome: Awaited<ReturnType<typeof fetchJobDetails>>;
+    try {
+      outcome = await fetchJobDetails(cs.vaultPath, [slug]);
+    } catch (e) {
+      const n2 = new Map(runBySlug);
+      n2.set(slug, { status: "failed", failedStage: null, detail: String(e) });
+      runBySlug = n2;
+      return;
+    }
+    runBySlug = applyOutcome(runBySlug, outcome);
+  }
+
   async function loadJobs() {
     if (!cs.vaultPath) return;
     const all = await listJobs(cs.vaultPath);
@@ -149,46 +256,129 @@
     })();
   });
 
-  // Live progress: per-step + run-finished events for the run we started.
+  // Live progress: per-step + run-finished events for ALL runs on this page.
+  // The discovery run is identified by `runId` (single run); job_detail runs are
+  // identified by matching `e.run_id` against the running entries in `runBySlug`.
   $effect(() => {
     const subs: (() => void)[] = [];
     let active = true;
     Promise.all([
       onRunStep((e) => {
-        if (e.run_id !== runId) return;
-        // Keep the legacy `progress` string for backward compat; set `phase` to the human phrase.
-        progress = `${e.stage}: ${e.status}`;
+        // ── Discovery run ──
+        if (e.run_id === runId) {
+          progress = `${e.stage}: ${e.status}`;
+          const label = phaseLabel(e.stage, e.status, e.detail);
+          if (label) phase = label;
+          return;
+        }
+        // ── Job-detail run: find the slug whose runId matches ──
+        let matchedSlug: string | undefined;
+        for (const [slug, rs] of runBySlug) {
+          if (rs.status === "running" && rs.runId === e.run_id) {
+            matchedSlug = slug;
+            break;
+          }
+        }
+        if (!matchedSlug) return;
+
+        const next = new Map(runBySlug);
+        const rs = next.get(matchedSlug) as RunStateRunning;
+        const newStageStatus = new Map(rs.stageStatus);
+        const stage = e.stage as JobDetailStage;
+
+        if (e.status === "running") {
+          // Mark this stage as now; mark all earlier canonical stages without status as skipped.
+          const stageIdx = JOB_DETAIL_STAGES.indexOf(stage);
+          for (let i = 0; i < stageIdx; i++) {
+            const earlier = JOB_DETAIL_STAGES[i];
+            if (!newStageStatus.has(earlier)) {
+              newStageStatus.set(earlier, "skipped");
+            }
+          }
+          newStageStatus.set(stage, "now");
+        } else if (e.status === "ok") {
+          newStageStatus.set(stage, "done");
+        } else if (e.status === "failed") {
+          newStageStatus.set(stage, "failed");
+        }
+
         const label = phaseLabel(e.stage, e.status, e.detail);
-        if (label) phase = label;
+        next.set(matchedSlug, {
+          ...rs,
+          phase: label || rs.phase,
+          stageStatus: newStageStatus,
+        });
+        runBySlug = next;
       }),
       onRunFinished(async (e) => {
-        if (e.run_id !== runId) return;
-        running = false;
-        progress = e.status;
-        // Reload jobs (to show newly discovered roles) and the company (to show last_checked).
-        await loadJobs();
-        cs.load();
-        // Build the result line from real data: read the check note for roles_found / failure reason.
-        if (e.status === "complete") {
-          try {
-            const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
-            const n = check?.roles_found ?? jobs.length;
-            phase = `Done · ${n} new role${n === 1 ? "" : "s"}`;
-          } catch {
-            phase = `Done · ${jobs.length} new role${jobs.length === 1 ? "" : "s"}`;
+        // ── Discovery run ──
+        if (e.run_id === runId) {
+          running = false;
+          progress = e.status;
+          await loadJobs();
+          cs.load();
+          if (e.status === "complete") {
+            try {
+              const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
+              const n = check?.roles_found ?? jobs.length;
+              phase = `Done · ${n} new role${n === 1 ? "" : "s"}`;
+            } catch {
+              phase = `Done · ${jobs.length} new role${jobs.length === 1 ? "" : "s"}`;
+            }
+          } else if (e.status === "failed") {
+            try {
+              const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
+              const failedStep = check?.steps.find((s) => s.status === "failed");
+              const reason = failedStep?.error ?? "unknown error";
+              phase = `Failed · ${reason}`;
+            } catch {
+              phase = "Failed";
+            }
+          } else {
+            phase = e.status;
           }
+          return;
+        }
+        // ── Job-detail run: find the slug whose runId matches ──
+        let matchedSlug: string | undefined;
+        for (const [slug, rs] of runBySlug) {
+          if (rs.status === "running" && rs.runId === e.run_id) {
+            matchedSlug = slug;
+            break;
+          }
+        }
+        if (!matchedSlug) return;
+
+        const next = new Map(runBySlug);
+
+        if (e.status === "complete") {
+          // Run succeeded — reload jobs so the row reflects the new fit_score, then remove the entry.
+          await loadJobs();
+          next.delete(matchedSlug);
         } else if (e.status === "failed") {
+          // Run failed — build a durable failed entry with the last failed stage info.
+          // `run:finished` carries no `detail`, so read the real reason from the check note.
+          const rs = next.get(matchedSlug) as RunStateRunning;
+          const lastFailedStage = [...rs.stageStatus.entries()].find(([, v]) => v === "failed")?.[0] ?? null;
+          let detail = "Run failed";
           try {
             const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
             const failedStep = check?.steps.find((s) => s.status === "failed");
-            const reason = failedStep?.error ?? "unknown error";
-            phase = `Failed · ${reason}`;
+            detail = failedStep?.error ?? "Run failed";
           } catch {
-            phase = "Failed";
+            // best-effort — keep generic fallback
           }
-        } else {
-          phase = e.status;
+          next.set(matchedSlug, {
+            status: "failed",
+            failedStage: lastFailedStage,
+            detail,
+          });
+          await loadJobs();
+        } else if (e.status === "cancelled") {
+          next.delete(matchedSlug);
+          await loadJobs();
         }
+        runBySlug = next;
       }),
     ]).then((u) => {
       if (active) subs.push(...u);
@@ -383,26 +573,111 @@
 
     {#if wtab === "roles"}
       <section class="panel">
-        <div class="panel__head">
-          <span>Roles found <span class="sub">{jobs.length}</span></span>
-          {#if jobs.length}
-            <span class="roles__actions">
-              <button class="linkbtn" onclick={() => (selectedSlugs = jobs.map((j) => j.slug))}>select all</button>
-              <button class="linkbtn" onclick={() => (selectedSlugs = [])}>clear</button>
-              <button class="btn sm" disabled title="JD fetch arrives in Phase B">Fetch selected ({selectedSlugs.length})</button>
-            </span>
-          {/if}
-        </div>
         {#if jobs.length === 0}
           <p class="empty">{c.last_checked ? "No roles found." : "Not fetched yet — \"Fetch jobs\" lists matching roles here."}</p>
         {:else}
-          <ul class="roles">
-            {#each jobs as j (j.slug)}
+          <!-- sticky action bar -->
+          <div class="roles__actionbar">
+            <span class="roles__selcount">{selectedSlugs.length} selected</span>
+            <button
+              class="btn primary sm"
+              disabled={selectedSlugs.length === 0 || !cs.vaultPath}
+              onclick={fetchSelected}
+            >Fetch selected ({selectedSlugs.length})</button>
+            <button
+              class="linkbtn"
+              onclick={() => {
+                selectedSlugs = sortedJobs
+                  .filter((j) => {
+                    const rs = runBySlug.get(j.slug);
+                    return !rs || rs.status !== "running";
+                  })
+                  .map((j) => j.slug);
+              }}
+            >select all</button>
+            <button class="linkbtn" onclick={() => (selectedSlugs = [])}>clear</button>
+          </div>
+
+          <ul class="roles__list">
+            {#each sortedJobs as j (j.slug)}
+              {@const rs = runBySlug.get(j.slug)}
+              {@const statusDisplay = classifyStatus(j.status)}
+              {@const band = fitBand(j.fit_score)}
               <li class="roles__row">
-                <input type="checkbox" bind:group={selectedSlugs} value={j.slug} />
-                <span class="roles__title">{j.title}</span>
-                <span class="roles__meta">{[levelLabel(j.level), j.location].filter(Boolean).join(" · ")}</span>
-                <span class="chip flat">{j.jd_fetched ? "fetched" : "new"}</span>
+                <!-- checkbox: stop propagation so it doesn't trigger the row link -->
+                <input
+                  type="checkbox"
+                  bind:group={selectedSlugs}
+                  value={j.slug}
+                  disabled={rs?.status === "running"}
+                  title={rs?.status === "running" ? "a fetch for this job is already running" : undefined}
+                  onclick={(ev) => ev.stopPropagation()}
+                />
+
+                <!-- fit column -->
+                <div class="roles__fit">
+                  {#if rs?.status === "running"}
+                    <span class="roles__fitnum unscored">···</span>
+                    <span class="roles__bandlbl">scoring</span>
+                  {:else if j.fit_score !== null}
+                    <span class="roles__fitnum {band.key}">{j.fit_score}</span>
+                    <span class="roles__bandlbl">{band.label.toLowerCase()}</span>
+                  {:else}
+                    <span class="roles__fitnum unscored">—</span>
+                    <span class="roles__bandlbl">new</span>
+                  {/if}
+                </div>
+
+                <!-- main content column — wrapped in a link for keyboard nav + a11y -->
+                <a class="roles__main" href="/jobs/{j.slug}">
+                  <div class="roles__titlerow">
+                    <span class="roles__title">{j.title}</span>
+
+                    {#if rs?.status === "running"}
+                      <!-- live progress indicator -->
+                      <span class="roles__live">
+                        <span class="roles__livedot"></span>
+                        {rs.phase}
+                        <span class="roles__steps" title={JOB_DETAIL_STAGES.join(" · ")}>
+                          {#each JOB_DETAIL_STAGES as stage}
+                            <i class={rs.stageStatus.get(stage) ?? ""}></i>
+                          {/each}
+                        </span>
+                      </span>
+                    {:else if rs?.status === "skipped"}
+                      <span class="chip flat">{rs.detail}</span>
+                    {:else if rs?.status === "failed"}
+                      <span class="chip danger">failed{rs.failedStage ? ` · ${rs.failedStage}` : ""}</span>
+                    {:else if statusDisplay.kind === "anomaly"}
+                      <span class="chip {statusDisplay.raw === null ? 'warn' : 'danger'}">{statusDisplay.message}</span>
+                    {:else if j.fit_score !== null}
+                      {#if j.fit_score === 0}
+                        <span class="chip danger">dealbreaker</span>
+                      {/if}
+                    {:else}
+                      <span class="chip flat">new</span>
+                    {/if}
+                  </div>
+
+                  <!-- meta: level · location -->
+                  <div class="roles__meta">
+                    {[levelLabel(j.level), j.location].filter(Boolean).join(" · ")}
+                    {#if rs?.status === "failed" && rs.detail}
+                      &nbsp;·&nbsp;<span class="sub">{rs.detail}</span>
+                    {/if}
+                  </div>
+                </a>
+
+                <!-- end column: actions (outside the link, stop click from bubbling to <li>) -->
+                <div class="roles__end">
+                  {#if rs?.status === "running"}
+                    <button class="linkbtn" onclick={() => cancelRun(rs.runId)}>cancel</button>
+                  {:else if rs?.status === "failed"}
+                    <button class="btn sm" onclick={(ev) => { ev.stopPropagation(); retrySlug(j.slug); }}>Retry</button>
+                  {:else if j.fit_score !== null || j.jd_fetched}
+                    <button class="btn sm" onclick={(ev) => { ev.stopPropagation(); goto(`/jobs/${j.slug}`); }}>Open</button>
+                  {/if}
+                </div>
               </li>
             {/each}
           </ul>

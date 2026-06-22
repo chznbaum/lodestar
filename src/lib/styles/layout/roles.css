@@ -1,0 +1,159 @@
+/* Roles tab — Triage List (.roles block). Consumes only tokens from tokens.css.
+ * No <style> blocks in .svelte files (CONVENTIONS.md). Squared corners throughout
+ * (--r-* tokens are all 0). Atoms from chip.css / button.css reused at-name. */
+
+/* ── action bar (sticky above list) ── */
+.roles__actionbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0.2rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--wire);
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
+
+.roles__selcount {
+  color: var(--muted);
+  margin-right: var(--sp-1);
+}
+
+/* ── list container ── */
+.roles__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── individual row ── */
+.roles__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-row-y) 0.2rem;
+  border-bottom: 1px solid var(--line);
+  transition: background var(--transition-fast);
+}
+.roles__row:hover {
+  background: var(--card-hover);
+}
+
+/* ── fit column (score number + band label) ── */
+.roles__fit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 2.6rem;
+  flex-shrink: 0;
+}
+
+.roles__fitnum {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+.roles__fitnum.strong,
+.roles__fitnum.good    { color: var(--good); }
+.roles__fitnum.partial,
+.roles__fitnum.weak    { color: var(--warn); }
+.roles__fitnum.mismatch { color: var(--danger); }
+.roles__fitnum.unscored { color: var(--faint); }
+
+.roles__bandlbl {
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+  text-transform: lowercase;
+  letter-spacing: 0.01em;
+}
+
+/* ── main content column (rendered as <a> for row-level navigation) ── */
+.roles__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  /* Reset link styles — the row is the visual affordance */
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.roles__titlerow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.roles__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-variation-settings: "opsz" 11, "wght" 600;
+  font-size: var(--fs-md);
+}
+
+.roles__meta {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+/* ── live progress (fetching state) ── */
+.roles__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+/* Pulsing dot for the active fetch */
+.roles__livedot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  animation: roles-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes roles-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.35; transform: scale(0.7); }
+}
+
+/* Step strip — a row of small CSS rectangles advancing through JOB_DETAIL_STAGES */
+.roles__steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.roles__steps i {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.22rem;
+  border-radius: 1px;
+  background: var(--wire);
+  font-style: normal;
+}
+.roles__steps i.done    { background: var(--primary); opacity: 0.7; }
+.roles__steps i.now     { background: var(--primary); }
+.roles__steps i.failed  { background: var(--danger); }
+.roles__steps i.skipped { background: var(--wire); opacity: 0.4; }
+
+/* ── end column (Open button or cancel link) ── */
+.roles__end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
