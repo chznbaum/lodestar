@@ -184,7 +184,7 @@ pub fn start_discovery(
         started_at: Some(now_iso()),
         finished_at: None,
         duration: None,
-        companies: vec![company_slug.to_string()],
+        subject: company_slug.to_string(),
         roles_found: 0,
         errors: 0,
         steps: vec![],
@@ -197,13 +197,20 @@ pub fn start_discovery(
         encoding_fixed: false,
     })
     .map_err(|e| e.to_string())?;
-    queue.enqueue(NewTask {
+    if let Err(e) = queue.enqueue(NewTask {
         run_id: run_id.clone(),
         stage: "careers-scrape".into(),
         class: "scrape".into(),
         target: company_slug.to_string(),
         payload,
-    })?;
+    }) {
+        // Reserved `running` note with no task to advance it → mark it `failed`, don't orphan it.
+        let mut failed = run;
+        failed.status = "failed".into();
+        failed.finished_at = Some(now_iso());
+        let _ = write_check(vault_path, &failed);
+        return Err(format!("enqueue careers-scrape for {company_slug:?} failed: {e}"));
+    }
     Ok(run_id)
 }
 
@@ -220,7 +227,6 @@ pub fn start_job_detail(
     let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
     let job = parse_job(job_slug, &text)?;
     let url = job.url.ok_or_else(|| format!("job {job_slug:?} has no url to scrape"))?;
-    let company = job.company.unwrap_or_default();
     std::fs::create_dir_all(Path::new(vault_path).join("checks")).map_err(|e| e.to_string())?;
     let run_id = next_run_id(vault_path, today)?;
     let run = Check {
@@ -231,7 +237,8 @@ pub fn start_job_detail(
         started_at: Some(now_iso()),
         finished_at: None,
         duration: None,
-        companies: if company.is_empty() { vec![] } else { vec![company] },
+        // A job_detail run is ABOUT the job; the company is a property of the job, not run state.
+        subject: job_slug.to_string(),
         roles_found: 0,
         errors: 0,
         steps: vec![],
@@ -243,14 +250,142 @@ pub fn start_job_detail(
         encoding_fixed: false,
     })
     .map_err(|e| e.to_string())?;
-    queue.enqueue(NewTask {
+    if let Err(e) = queue.enqueue(NewTask {
         run_id: run_id.clone(),
         stage: "jd-scrape".into(),
         class: "scrape".into(),
         target: job_slug.into(),
         payload,
-    })?;
+    }) {
+        // The `running` note was already written to reserve the run id. With no task enqueued it
+        // would sit `running` forever, so mark it `failed` before surfacing the enqueue error.
+        let mut failed = run;
+        failed.status = "failed".into();
+        failed.finished_at = Some(now_iso());
+        let _ = write_check(vault_path, &failed);
+        return Err(format!("enqueue jd-scrape for {job_slug:?} failed: {e}"));
+    }
     Ok(run_id)
+}
+
+/// A job that successfully opened a `job_detail` run.
+#[derive(Debug, Clone, Serialize)]
+pub struct RunStart {
+    pub slug: String,
+    pub run_id: String,
+}
+
+/// A selected job that could NOT start a run, with the reason (e.g. the stub has no `url`).
+/// Surfaced to the caller/UI rather than swallowed, so the user sees which picks didn't launch.
+#[derive(Debug, Clone, Serialize)]
+pub struct SlugError {
+    pub slug: String,
+    pub error: String,
+}
+
+/// A selected job intentionally NOT started because a `job_detail` run for it is already in
+/// flight — a no-op, distinct from a `failed` start.
+#[derive(Debug, Clone, Serialize)]
+pub struct SlugSkip {
+    pub slug: String,
+    pub reason: String,
+}
+
+/// The per-slug outcome of `fetch_job_details`: which selected jobs opened runs (with their run
+/// ids, so the UI can attribute live progress), which were skipped (already running), and which
+/// failed to start (with the reason).
+#[derive(Debug, Clone, Serialize)]
+pub struct FetchJobDetailsOutcome {
+    pub started: Vec<RunStart>,
+    pub skipped: Vec<SlugSkip>,
+    pub failed: Vec<SlugError>,
+}
+
+/// Open a `job_detail` run for each slug, partitioning: a job already in flight → `skipped`; an
+/// un-startable stub (e.g. no `url`) → `failed`; otherwise → `started` (with the run id). "In
+/// flight" = a `running` job_detail run whose `subject` is that job — the run note is the durable
+/// lifecycle record, so it's the authoritative place to ask. Pure over the queue + vault (no
+/// thread, no Tauri) so it's unit-testable; the Tauri command wraps this and spawns the drain.
+pub fn start_job_detail_runs(
+    queue: &dyn Queue,
+    vault_path: &str,
+    slugs: &[String],
+    today: &str,
+) -> FetchJobDetailsOutcome {
+    // Jobs already being fetched (a running job_detail run). Computed once and grown as this call
+    // starts new runs, so it dedups both against in-flight runs AND in-call duplicate slugs. A
+    // checks-read failure degrades to no-dedup (a rare duplicate beats blocking every fetch).
+    let mut in_flight: HashSet<String> = crate::check::list_checks(vault_path.to_string())
+        .map(|checks| {
+            checks
+                .into_iter()
+                .filter(|c| c.kind == "job_detail" && c.status == "running")
+                .map(|c| c.subject)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut started = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+    for slug in slugs {
+        if in_flight.contains(slug) {
+            skipped.push(SlugSkip {
+                slug: slug.clone(),
+                reason: "a fetch for this job is already running".into(),
+            });
+            continue;
+        }
+        match start_job_detail(queue, vault_path, slug, today) {
+            Ok(run_id) => {
+                started.push(RunStart { slug: slug.clone(), run_id });
+                in_flight.insert(slug.clone());
+            }
+            Err(error) => failed.push(SlugError { slug: slug.clone(), error }),
+        }
+    }
+    FetchJobDetailsOutcome { started, skipped, failed }
+}
+
+/// Abort runs left mid-flight because a drain stopped unexpectedly. For each run still `running`:
+/// discard its outstanding queue tasks (so no later drain half-resumes it), then mark the note
+/// `failed` with `reason` recorded as a synthetic `drain` step. Runs already in a terminal state
+/// are left untouched. Returns the run ids actually aborted (so the caller can emit events).
+pub fn abort_running_runs(
+    queue: &dyn Queue,
+    vault_path: &str,
+    run_ids: &[String],
+    reason: &str,
+) -> Vec<String> {
+    let mut aborted = Vec::new();
+    for run_id in run_ids {
+        let Ok(mut run) = get_check(vault_path.to_string(), run_id.clone()) else {
+            continue; // can't read it → nothing safe to do here
+        };
+        if run.status != "running" {
+            continue; // already terminal (complete/failed/cancelled) — leave it
+        }
+        let _ = queue.discard_run_tasks(run_id);
+        run.steps.push(crate::check::Step {
+            stage: "drain".into(),
+            class: "script".into(),
+            target: run.subject.clone(),
+            status: "failed".into(),
+            attempts: 1,
+            started_at: None,
+            finished_at: Some(now_iso()),
+            error: Some(reason.to_string()),
+            cost: None,
+            warnings: vec![],
+        });
+        run.errors += 1;
+        run.status = "failed".into();
+        run.finished_at = Some(now_iso());
+        if write_check(vault_path, &run).is_ok() {
+            aborted.push(run_id.clone());
+        }
+    }
+    aborted
 }
 
 /// Mark a run as `failed` with a human-readable error. The scrape step row was already
@@ -2273,7 +2408,7 @@ mod tests {
             started_at: Some(now_iso()),
             finished_at: None,
             duration: None,
-            companies: vec![],
+            subject: slug.to_string(),
             roles_found: 0,
             errors: 0,
             steps: vec![],
@@ -2745,6 +2880,181 @@ mod tests {
             run.steps.iter().any(|s| s.stage == "alignment" && s.class == "llm"),
             "an alignment llm step must be recorded"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── Task 12: fetch_job_details core ──────────────────────────────────────
+
+    /// `start_job_detail_runs` opens one run per startable slug, partitions a bad slug into
+    /// `failed` (with its error) instead of eprintln-swallowing it, and enqueues exactly one
+    /// jd-scrape task per started run.
+    #[test]
+    fn start_job_detail_runs_partitions_started_and_failed() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-fjd-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        std::fs::write(dir.join("jobs/job-a.md"), "---\nid: job-a\ntitle: A\ncompany: \"[[acme]]\"\nurl: https://acme.com/a\nstatus: new\n---\n").unwrap();
+        std::fs::write(dir.join("jobs/job-b.md"), "---\nid: job-b\ntitle: B\ncompany: \"[[acme]]\"\nurl: https://acme.com/b\nstatus: new\n---\n").unwrap();
+        // job-bad has no url → start_job_detail errors before creating a run.
+        std::fs::write(dir.join("jobs/job-bad.md"), "---\nid: job-bad\ntitle: Bad\ncompany: \"[[acme]]\"\nstatus: new\n---\n").unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        let slugs = vec!["job-a".to_string(), "job-bad".to_string(), "job-b".to_string()];
+        let outcome = start_job_detail_runs(&q, vault, &slugs, "2026-06-21");
+
+        assert_eq!(outcome.started.len(), 2, "two startable slugs must open runs");
+        assert!(outcome.started.iter().any(|r| r.slug == "job-a" && !r.run_id.is_empty()));
+        assert!(outcome.started.iter().any(|r| r.slug == "job-b" && !r.run_id.is_empty()));
+        assert_eq!(outcome.failed.len(), 1, "the url-less slug must be reported, not swallowed");
+        assert_eq!(outcome.failed[0].slug, "job-bad");
+        assert!(outcome.failed[0].error.contains("url"), "failure must carry the reason: {:?}", outcome.failed[0].error);
+
+        // Each started run is a job_detail run, and exactly two jd-scrape tasks are queued.
+        for r in &outcome.started {
+            assert_eq!(get_check(vault.to_string(), r.run_id.clone()).unwrap().kind, "job_detail");
+        }
+        assert!(q.claim_next().unwrap().is_some());
+        assert!(q.claim_next().unwrap().is_some());
+        assert!(q.claim_next().unwrap().is_none(), "no task for the failed slug");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `job_detail` run is ABOUT a job — its run note must record the job as the subject
+    /// (not the company; the company is a property of the job, read from the job note).
+    #[test]
+    fn start_job_detail_records_the_job_as_subject() {
+        let dir = job_detail_fixture_vault();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_job_detail(&q, vault, "senior-engineer-acme", "2026-06-19").unwrap();
+        let run = get_check(vault.to_string(), run_id).unwrap();
+        assert_eq!(run.kind, "job_detail");
+        assert_eq!(
+            run.subject, "senior-engineer-acme",
+            "a job_detail run's subject is the JOB, not the company"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Re-fetching a job that already has a `running` job_detail run is skipped (not a second
+    /// run) and surfaced in `skipped` — the backend half of "disable the button while running".
+    #[test]
+    fn start_job_detail_runs_skips_a_job_already_running() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-dedup-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        std::fs::write(dir.join("jobs/job-a.md"), "---\nid: job-a\ntitle: A\ncompany: \"[[acme]]\"\nurl: https://acme.com/a\nstatus: new\n---\n").unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        // A job_detail run for job-a is already in flight.
+        let running = crate::check::Check {
+            slug: "2026-06-20-0001".into(), kind: "job_detail".into(), trigger: "manual".into(),
+            status: "running".into(), started_at: Some(now_iso()), finished_at: None, duration: None,
+            subject: "job-a".into(), roles_found: 0, errors: 0, steps: vec![],
+        };
+        crate::check::write_check(vault, &running).unwrap();
+
+        let outcome = start_job_detail_runs(&q, vault, &["job-a".to_string()], "2026-06-21");
+        assert!(outcome.started.is_empty(), "an already-running job must not start a second run");
+        assert_eq!(outcome.skipped.len(), 1);
+        assert_eq!(outcome.skipped[0].slug, "job-a");
+        assert!(q.claim_next().unwrap().is_none(), "a skipped job enqueues no task");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The same slug listed twice in one call opens one run; the duplicate is skipped.
+    #[test]
+    fn start_job_detail_runs_skips_duplicate_slug_within_one_call() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-dedup2-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        std::fs::write(dir.join("jobs/job-b.md"), "---\nid: job-b\ntitle: B\ncompany: \"[[acme]]\"\nurl: https://acme.com/b\nstatus: new\n---\n").unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        let outcome = start_job_detail_runs(&q, vault, &["job-b".to_string(), "job-b".to_string()], "2026-06-21");
+        assert_eq!(outcome.started.len(), 1, "first occurrence starts a run");
+        assert_eq!(outcome.skipped.len(), 1, "the in-call duplicate is skipped");
+        assert!(q.claim_next().unwrap().is_some());
+        assert!(q.claim_next().unwrap().is_none(), "only one task for the deduped slug");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A queue whose `enqueue` always fails — to prove a failed enqueue doesn't orphan the run note.
+    struct FailingEnqueueQueue;
+    impl Queue for FailingEnqueueQueue {
+        fn enqueue(&self, _t: NewTask) -> Result<i64, String> { Err("disk full".into()) }
+        fn claim_next(&self) -> Result<Option<QueuedTask>, String> { Ok(None) }
+        fn complete(&self, _id: i64) -> Result<(), String> { Ok(()) }
+        fn fail(&self, _id: i64, _err: &str) -> Result<(), String> { Ok(()) }
+        fn kill(&self, _id: i64, _err: &str) -> Result<(), String> { Ok(()) }
+        fn pending_count(&self) -> Result<usize, String> { Ok(0) }
+        fn discard_run_tasks(&self, _run_id: &str) -> Result<usize, String> { Ok(0) }
+    }
+
+    /// If `enqueue` fails after the `running` note was written (to reserve the run id), the note
+    /// must be marked `failed`, not left a phantom `running` with no task to ever advance it.
+    #[test]
+    fn start_job_detail_marks_run_failed_if_enqueue_fails() {
+        let dir = job_detail_fixture_vault();
+        let vault = dir.to_str().unwrap();
+        let result = start_job_detail(&FailingEnqueueQueue, vault, "senior-engineer-acme", "2026-06-19");
+        assert!(result.is_err(), "an enqueue failure must propagate");
+        let run = get_check(vault.to_string(), "2026-06-19-0001".to_string()).unwrap();
+        assert_eq!(run.status, "failed", "a failed enqueue must not leave the run 'running'");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn running_check(slug: &str, subject: &str, status: &str) -> crate::check::Check {
+        crate::check::Check {
+            slug: slug.into(), kind: "job_detail".into(), trigger: "manual".into(),
+            status: status.into(), started_at: Some(now_iso()), finished_at: None, duration: None,
+            subject: subject.into(), roles_found: 0, errors: 0, steps: vec![],
+        }
+    }
+
+    /// When a drain aborts, the runs it abandons must not be left `running`: each still-running one
+    /// is marked `failed` (with the reason as a synthetic `drain` step) and its outstanding tasks
+    /// discarded; a run that already reached a terminal state is left untouched.
+    #[test]
+    fn abort_running_runs_fails_only_running_runs_and_discards_their_tasks() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-abort-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        write_check(vault, &running_check("2026-06-21-0001", "job-a", "running")).unwrap();
+        q.enqueue(NewTask {
+            run_id: "2026-06-21-0001".into(), stage: "jd-scrape".into(), class: "scrape".into(),
+            target: "job-a".into(), payload: "{}".into(),
+        }).unwrap();
+        // An already-complete run that must NOT be touched.
+        write_check(vault, &running_check("2026-06-21-0002", "job-b", "complete")).unwrap();
+
+        let aborted = abort_running_runs(
+            &q, vault,
+            &["2026-06-21-0001".to_string(), "2026-06-21-0002".to_string()],
+            "fetch worker stopped after a task errored: boom",
+        );
+        assert_eq!(aborted, vec!["2026-06-21-0001".to_string()], "only the running run is aborted");
+
+        let r1 = get_check(vault.to_string(), "2026-06-21-0001".to_string()).unwrap();
+        assert_eq!(r1.status, "failed", "the abandoned running run must be failed, not left running");
+        assert!(
+            r1.steps.iter().any(|s| s.stage == "drain" && s.status == "failed"
+                && s.error.as_deref() == Some("fetch worker stopped after a task errored: boom")),
+            "the abort reason must be recorded as a failed drain step: {:?}", r1.steps
+        );
+        let r2 = get_check(vault.to_string(), "2026-06-21-0002".to_string()).unwrap();
+        assert_eq!(r2.status, "complete", "a terminal run must be left untouched");
+
+        assert!(q.claim_next().unwrap().is_none(), "the aborted run's outstanding task is discarded");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

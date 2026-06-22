@@ -10,7 +10,10 @@ use crate::company::list_companies;
 use crate::config::load_config;
 use crate::llm::OpenRouterLlm;
 use crate::pipeline::queue::SqliteQueue;
-use crate::pipeline::steps::{pump_once, start_discovery, EventSink};
+use crate::pipeline::steps::{
+    abort_running_runs, pump_once, start_discovery, start_job_detail_runs, EventSink,
+    FetchJobDetailsOutcome,
+};
 use crate::scraper::ScrapingBeeScraper;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -32,9 +35,11 @@ struct StepEvent {
     detail: Option<String>,
 }
 
-/// Emits live progress to the frontend via Tauri events.
+/// Emits live progress to the frontend via Tauri events, and prunes a run's id from the shared
+/// `cancelled` set when it finishes (so the set doesn't grow unbounded across a long session).
 struct TauriSink {
     app: AppHandle,
+    cancelled: Arc<Mutex<HashSet<String>>>,
 }
 impl EventSink for TauriSink {
     fn step_done(&self, run_id: &str, stage: &str, status: &str) {
@@ -48,6 +53,10 @@ impl EventSink for TauriSink {
             "run:finished",
             StepEvent { run_id: run_id.into(), stage: String::new(), status: status.into(), detail: None },
         );
+        // A finished run never needs cancelling again — drop its id so the set stays bounded.
+        if let Ok(mut set) = self.cancelled.lock() {
+            set.remove(run_id);
+        }
     }
     fn step_started(&self, run_id: &str, stage: &str, detail: Option<&str>) {
         let _ = self.app.emit(
@@ -81,31 +90,73 @@ pub fn fetch_jobs_for_company(
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let run_id = start_discovery(&*state.queue, &vault_path, &slug, &careers_url, &today)?;
 
-    // Drain off the tokio reactor (blocking HTTP). The durable queue means a crash mid-run
-    // leaves the remaining tasks persisted for a later drain to resume.
+    spawn_drain(app, &state, vault_path, cfg, vec![run_id.clone()]);
+    Ok(run_id)
+}
+
+/// Drain the queue on a background thread (off the tokio reactor — the real scraper/LLM are
+/// blocking HTTP). Loops `pump_once` until the queue empties. On a non-per-step pump error the
+/// drain can't continue safely, so it ABORTS the runs it owns that are still `running`
+/// (`abort_running_runs` marks them failed + discards their tasks), emits a `run:finished`=failed
+/// for each so the UI isn't blind, and stops. The durable queue means a clean crash leaves tasks
+/// persisted for a later drain; this path handles the case where the drain itself errors out.
+fn spawn_drain(
+    app: AppHandle,
+    state: &State<'_, PipelineState>,
+    vault_path: String,
+    cfg: crate::config::PipelineConfig,
+    owned_run_ids: Vec<String>,
+) {
     let queue = state.queue.clone();
     let cancelled = state.cancelled.clone();
-    let app_for_thread = app.clone();
     std::thread::spawn(move || {
         let scraper = ScrapingBeeScraper;
         let llm = OpenRouterLlm;
-        let sink = TauriSink { app: app_for_thread };
-        let is_cancelled = move |rid: &str| {
-            cancelled.lock().map(|set| set.contains(rid)).unwrap_or(false)
-        };
+        let sink = TauriSink { app, cancelled: cancelled.clone() };
+        let is_cancelled =
+            move |rid: &str| cancelled.lock().map(|set| set.contains(rid)).unwrap_or(false);
         loop {
             match pump_once(&*queue, &vault_path, &cfg, &scraper, &llm, &sink, &is_cancelled) {
                 Ok(true) => continue,
                 Ok(false) => break, // queue drained
                 Err(e) => {
                     eprintln!("pipeline worker error: {e}");
+                    let reason = format!("fetch worker stopped after a task errored: {e}");
+                    for id in abort_running_runs(&*queue, &vault_path, &owned_run_ids, &reason) {
+                        sink.run_finished(&id, "failed");
+                    }
                     break;
                 }
             }
         }
     });
+}
 
-    Ok(run_id)
+/// Start a `job_detail` run for each selected job (the Roles tab's "Fetch selected") and drain
+/// them on one background thread. Returns immediately with the per-slug outcome — which jobs
+/// opened runs (with run ids, for live-progress attribution) and which failed to start (with the
+/// reason) — never eprintln-swallowing a bad pick. Progress streams via `run:step`/`run:finished`.
+#[tauri::command]
+pub fn fetch_job_details(
+    app: AppHandle,
+    state: State<'_, PipelineState>,
+    vault_path: String,
+    slugs: Vec<String>,
+) -> Result<FetchJobDetailsOutcome, String> {
+    let cfg = load_config(&app.path().app_config_dir().map_err(|e| e.to_string())?);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let outcome = start_job_detail_runs(&*state.queue, &vault_path, &slugs, &today);
+
+    // Nothing started → nothing to drain.
+    if outcome.started.is_empty() {
+        return Ok(outcome);
+    }
+
+    // One drain thread for all enqueued runs (the shared durable queue means two concurrent drains
+    // just split the work). It owns the runs it started — those are what it aborts on a drain error.
+    let owned: Vec<String> = outcome.started.iter().map(|r| r.run_id.clone()).collect();
+    spawn_drain(app, &state, vault_path, cfg, owned);
+    Ok(outcome)
 }
 
 /// Mark a run cancelled — the drain skips its remaining tasks without dispatching them.

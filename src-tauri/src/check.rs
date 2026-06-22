@@ -39,7 +39,9 @@ pub struct Check {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub duration: Option<String>,
-    pub companies: Vec<String>,
+    /// The single entity this run is about — a company slug for `job_check`, a job slug for
+    /// `job_detail`. `kind` is the type discriminator; one run, one subject (never a list).
+    pub subject: String,
     pub roles_found: u32,
     pub errors: u32,
     pub steps: Vec<Step>,
@@ -54,7 +56,7 @@ struct Front {
     finished_at: Option<String>,
     duration: Option<String>,
     #[serde(default)]
-    companies: Vec<String>,
+    subject: String,
     #[serde(default)]
     roles_found: u32,
     #[serde(default)]
@@ -74,7 +76,7 @@ pub fn parse_check(slug: &str, text: &str) -> Result<Check, String> {
         started_at: f.started_at,
         finished_at: f.finished_at,
         duration: f.duration,
-        companies: f.companies,
+        subject: f.subject,
         roles_found: f.roles_found,
         errors: f.errors,
         steps: f.steps,
@@ -96,7 +98,7 @@ pub fn render_check_note(check: &Check) -> String {
         finished_at: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         duration: Option<&'a str>,
-        companies: &'a [String],
+        subject: &'a str,
         roles_found: u32,
         errors: u32,
         steps: &'a [Step],
@@ -109,17 +111,15 @@ pub fn render_check_note(check: &Check) -> String {
         started_at: check.started_at.as_deref(),
         finished_at: check.finished_at.as_deref(),
         duration: check.duration.as_deref(),
-        companies: &check.companies,
+        subject: &check.subject,
         roles_found: check.roles_found,
         errors: check.errors,
         steps: &check.steps,
     };
     let yaml = serde_yaml::to_string(&fm).expect("check frontmatter serializes");
     let summary = format!(
-        "{} companies · {} roles found · {} errors",
-        check.companies.len(),
-        check.roles_found,
-        check.errors,
+        "{} {} · {} roles found · {} errors",
+        check.kind, check.subject, check.roles_found, check.errors,
     );
     format!("---\n{yaml}---\n\n## Summary\n\n{summary}\n")
 }
@@ -163,7 +163,7 @@ pub struct CheckSummary {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub duration: Option<String>,
-    pub company_count: usize,
+    pub subject: String,
     pub roles_found: u32,
     pub step_count: usize,
     pub failed_count: usize,
@@ -182,7 +182,7 @@ impl CheckSummary {
             started_at: c.started_at.clone(),
             finished_at: c.finished_at.clone(),
             duration: c.duration.clone(),
-            company_count: c.companies.len(),
+            subject: c.subject.clone(),
             roles_found: c.roles_found,
             step_count: c.steps.len(),
             failed_count: c.steps.iter().filter(|s| s.status == "failed").count(),
@@ -219,7 +219,7 @@ pub fn list_checks(vault_path: String) -> Result<Vec<CheckSummary>, String> {
 mod tests {
     use super::*;
 
-    const RUN: &str = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: complete\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n  - stage: structure-listings\n    class: llm\n    target: stripe\n    status: ok\n    attempts: 1\n---\n\n## Summary\n\nstripe: 2 roles\n";
+    const RUN: &str = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: complete\nstarted_at: 2026-06-17T10:00:00\nsubject: stripe\nroles_found: 2\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n  - stage: structure-listings\n    class: llm\n    target: stripe\n    status: ok\n    attempts: 1\n---\n\n## Summary\n\nstripe: 2 roles\n";
 
     #[test]
     fn parses_run_with_steps() {
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(c.slug, "2026-06-17-0001");
         assert_eq!(c.kind, "job_check");
         assert_eq!(c.status, "complete");
-        assert_eq!(c.companies, vec!["stripe".to_string()]);
+        assert_eq!(c.subject, "stripe");
         assert_eq!(c.roles_found, 2);
         assert_eq!(c.steps.len(), 2);
         assert_eq!(c.steps[0].stage, "careers-scrape");
@@ -241,7 +241,7 @@ mod tests {
         let c = parse_check("r2", t).unwrap();
         assert!(c.steps.is_empty());
         assert_eq!(c.roles_found, 0);
-        assert!(c.companies.is_empty());
+        assert!(c.subject.is_empty());
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
             started_at: Some("2026-06-17T10:00:00".into()),
             finished_at: None,
             duration: None,
-            companies: vec!["stripe".into()],
+            subject: "stripe".into(),
             roles_found: 0,
             errors: 0,
             steps: vec![],
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(ids, vec!["2026-06-17-0001", "2026-06-16-0001"]); // newest first
         assert_eq!(list[0].step_count, 2);
         assert_eq!(list[0].failed_count, 1);
-        assert_eq!(list[0].company_count, 1);
+        assert_eq!(list[0].subject, "stripe");
         assert_eq!(list[0].roles_found, 3);
 
         std::fs::remove_dir_all(&dir).ok();
@@ -411,7 +411,7 @@ mod tests {
     fn old_step_without_warnings_key_parses_with_empty_warnings() {
         // A note serialized before the warnings field was added must still parse cleanly.
         // (Exercises the `#[serde(default)]` on Step.warnings.)
-        let text = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: complete\nstarted_at: 2026-06-17T10:00:00\ncompanies: [\"stripe\"]\nroles_found: 2\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n---\n\n## Summary\n\n1 companies · 2 roles found · 0 errors\n";
+        let text = "---\nid: 2026-06-17-0001\nkind: job_check\ntrigger: manual\nstatus: complete\nstarted_at: 2026-06-17T10:00:00\nsubject: stripe\nroles_found: 2\nerrors: 0\nsteps:\n  - stage: careers-scrape\n    class: scrape\n    target: stripe\n    status: ok\n    attempts: 1\n    cost: 5\n---\n\n## Summary\n\njob_check stripe · 2 roles found · 0 errors\n";
         let c = parse_check("2026-06-17-0001", text).unwrap();
         assert_eq!(c.steps.len(), 1);
         assert!(

@@ -51,6 +51,10 @@ pub trait Queue {
     /// re-enqueued as a separate task.
     fn kill(&self, id: i64, err: &str) -> Result<(), String>;
     fn pending_count(&self) -> Result<usize, String>;
+    /// Discard a run's OUTSTANDING tasks (`pending`/`claimed`) — used when aborting a run whose
+    /// drain stopped, so a later drain can't half-resume it. `done`/`dead` rows (history) are
+    /// left untouched. Returns how many tasks were removed.
+    fn discard_run_tasks(&self, run_id: &str) -> Result<usize, String>;
 }
 
 /// Exponential backoff between retry attempts, capped at 5 minutes.
@@ -170,6 +174,17 @@ impl Queue for SqliteQueue {
             .map_err(|e| e.to_string())?;
         Ok(n as usize)
     }
+
+    fn discard_run_tasks(&self, run_id: &str) -> Result<usize, String> {
+        let n = self
+            .lock()?
+            .execute(
+                "DELETE FROM tasks WHERE run_id=?1 AND state IN ('pending','claimed')",
+                params![run_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(n)
+    }
 }
 
 #[cfg(test)]
@@ -255,5 +270,21 @@ mod tests {
     #[test]
     fn backoff_grows_with_attempts() {
         assert!(backoff_delay(2) > backoff_delay(1));
+    }
+
+    #[test]
+    fn discard_run_tasks_removes_only_that_runs_outstanding_tasks() {
+        let q = SqliteQueue::open(&temp_db()).unwrap();
+        q.enqueue(new("run-a", "s1")).unwrap();
+        q.enqueue(new("run-a", "s2")).unwrap();
+        q.enqueue(new("run-b", "s1")).unwrap();
+
+        let removed = q.discard_run_tasks("run-a").unwrap();
+        assert_eq!(removed, 2, "both of run-a's outstanding tasks are discarded");
+
+        // run-b's task is untouched and still claimable; run-a's are gone.
+        let t = q.claim_next().unwrap().expect("run-b's task remains");
+        assert_eq!(t.run_id, "run-b");
+        assert!(q.claim_next().unwrap().is_none(), "no run-a tasks remain");
     }
 }

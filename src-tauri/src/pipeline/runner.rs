@@ -135,7 +135,7 @@ mod tests {
             started_at: Some("2026-06-17T10:00:00".into()),
             finished_at: None,
             duration: None,
-            companies: vec!["stripe".into()],
+            subject: "stripe".into(),
             roles_found: 0,
             errors: 0,
             steps: vec![],

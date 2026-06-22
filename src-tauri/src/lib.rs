@@ -48,6 +48,8 @@ pub fn run() {
             company::set_company_status,
             domain::list_domains,
             job::list_jobs,
+            job::update_job_field,
+            job::set_job_status,
             check::list_checks,
             check::get_check,
             secrets::set_secret,
@@ -55,6 +57,7 @@ pub fn run() {
             config::get_config,
             config::set_config,
             worker::fetch_jobs_for_company,
+            worker::fetch_job_details,
             worker::cancel_run,
             watcher::start_vault_watcher
         ])
