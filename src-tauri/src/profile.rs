@@ -122,22 +122,41 @@ pub fn read_target_criteria(vault_path: &str) -> Result<TargetCriteria, String> 
     parse_target_criteria(&text)
 }
 
-/// `(slug, headline)` for every accomplishment note in `profile/accomplishments/`,
-/// stable-sorted by slug. The headline is the note's `headline:` frontmatter (empty when
-/// absent — the note stays citable by slug). Used as the citable evidence list for the
-/// qualitative `alignment` step.
-pub fn list_accomplishments(vault_path: &str) -> Result<Vec<(String, String)>, String> {
+/// An accomplishment note: headline + body + the competency slugs it demonstrates.
+/// `demonstrates` contains bare slugs (wikilinks stripped). Used as context for the
+/// qualitative `alignment` step — competency names are resolved at format time.
+pub struct Accomplishment {
+    pub slug: String,
+    pub headline: String,
+    /// The note body (everything after the frontmatter), trimmed.
+    pub body: String,
+    /// Competency slugs (wikilinks stripped) from the `demonstrates:` frontmatter field.
+    pub demonstrates: Vec<String>,
+}
+
+/// Every accomplishment note in `profile/accomplishments/`, stable-sorted by slug.
+/// Returns headline, body, and demonstrates competency slugs for each note.
+/// Used as context for the qualitative `alignment` step.
+pub fn list_accomplishments(vault_path: &str) -> Result<Vec<Accomplishment>, String> {
     let dir = Path::new(vault_path).join("profile").join("accomplishments");
     let mut out = crate::note::read_notes_in(&dir, |slug, text| {
         #[derive(Deserialize)]
         struct AccFront {
             headline: Option<String>,
+            #[serde(default)]
+            demonstrates: Vec<String>,
         }
-        let (fm, _body) = split_frontmatter(text);
+        let (fm, body) = split_frontmatter(text);
         let f: AccFront = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
-        Ok((slug.to_string(), f.headline.unwrap_or_default().trim().to_string()))
+        let demonstrates = f.demonstrates.iter().map(|d| crate::note::strip_wikilink(d)).collect();
+        Ok(Accomplishment {
+            slug: slug.to_string(),
+            headline: f.headline.unwrap_or_default().trim().to_string(),
+            body: body.trim().to_string(),
+            demonstrates,
+        })
     })?;
-    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.sort_by(|a, b| a.slug.cmp(&b.slug));
     Ok(out)
 }
 
@@ -252,29 +271,32 @@ mod tests {
     // ── list_accomplishments ───────────────────────────────────────────────────
 
     #[test]
-    fn list_accomplishments_returns_sorted_slug_headline_pairs() {
-        let dir = std::env::temp_dir().join(format!("lodestar-acc-{}", std::process::id()));
+    fn list_accomplishments_returns_sorted_with_body_and_demonstrates() {
+        let dir = std::env::temp_dir().join(format!("lodestar-acc2-{}", std::process::id()));
         let acc = dir.join("profile").join("accomplishments");
         std::fs::create_dir_all(&acc).unwrap();
         std::fs::write(
             acc.join("zeta-win.md"),
-            "---\nid: zeta-win\nheadline: \"Shipped Zeta end to end.\"\ndemonstrates: [\"[[rust]]\"]\n---\nbody\n",
+            "---\nid: zeta-win\nheadline: \"Shipped Zeta end to end.\"\ndemonstrates: [\"[[rust]]\", \"[[distributed-systems]]\"]\n---\nWe shipped the Zeta platform under budget.\n",
         )
         .unwrap();
         std::fs::write(
             acc.join("alpha-win.md"),
-            "---\nid: alpha-win\nheadline: \"Cut infra spend 30%.\"\n---\nbody\n",
+            "---\nid: alpha-win\nheadline: \"Cut infra spend 30%.\"\ndemonstrates: []\n---\nMoved workloads to spot instances.\n",
         )
         .unwrap();
         let got = list_accomplishments(dir.to_str().unwrap()).unwrap();
         std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(
-            got,
-            vec![
-                ("alpha-win".to_string(), "Cut infra spend 30%.".to_string()),
-                ("zeta-win".to_string(), "Shipped Zeta end to end.".to_string()),
-            ]
-        );
+        // sorted by slug
+        assert_eq!(got[0].slug, "alpha-win");
+        assert_eq!(got[0].headline, "Cut infra spend 30%.");
+        assert_eq!(got[0].body, "Moved workloads to spot instances.");
+        assert!(got[0].demonstrates.is_empty());
+        assert_eq!(got[1].slug, "zeta-win");
+        assert_eq!(got[1].headline, "Shipped Zeta end to end.");
+        assert_eq!(got[1].body, "We shipped the Zeta platform under budget.");
+        // demonstrates slugs stripped of wikilinks
+        assert_eq!(got[1].demonstrates, vec!["rust".to_string(), "distributed-systems".to_string()]);
     }
 
     #[test]

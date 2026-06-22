@@ -1,4 +1,5 @@
 mod check;
+mod community;
 mod company;
 mod competency;
 mod config;

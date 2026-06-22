@@ -1364,6 +1364,16 @@ fn dispatch_non_scrape<L: Llm>(
             let experiences = crate::experience::list_experiences(vault_path).unwrap_or_default();
             let accomplishments =
                 crate::profile::list_accomplishments(vault_path).unwrap_or_default();
+            let community = crate::community::list_community(vault_path).unwrap_or_default();
+
+            // Build slug→name competency map for resolving competency slugs in experiences and
+            // accomplishments at format time (no mutation of the shared Experience struct).
+            let competency_names: std::collections::HashMap<String, String> =
+                crate::competency::list_competencies(vault_path)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|c| (c.slug, c.name))
+                    .collect();
 
             // Targeting context: structured target VALUES + the target_criteria body prose. The
             // body is the user's evolving targeting narrative (kept, not dropped); the values let
@@ -1386,6 +1396,8 @@ fn dispatch_non_scrape<L: Llm>(
                 targets: &targets,
                 experiences: &experiences,
                 accomplishments: &accomplishments,
+                community: &community,
+                competency_names: &competency_names,
                 breakdown: &p.breakdown,
             };
             let prompt = build_alignment_prompt(&model_for(cfg, "alignment"), &inp);
@@ -1458,6 +1470,7 @@ fn render_targets(t: &crate::profile::TargetCriteria, body: &str) -> String {
         (_, Some(c)) => format!("{comp} {c}"),
     };
     let mut lines = vec![
+        format!("  target_titles: {}", join(&t.target_titles)),
         format!("  comp: {comp}"),
         format!("  target_levels: {}", join(&t.target_levels)),
         format!("  work_arrangements: {}", join(&t.work_arrangements)),
@@ -2874,6 +2887,27 @@ mod tests {
         assert!(out.contains("dev_tools"), "preferred_domains must appear");
         assert!(out.contains("gambling"), "avoid_domains must appear");
         assert!(out.contains("I'm targeting founding-eng roles."), "body prose must appear");
+    }
+
+    #[test]
+    fn render_targets_includes_target_titles() {
+        let c = crate::profile::parse_target_criteria(
+            "---\ntarget_titles: [\"Founding Engineer\", \"Head of Engineering\"]\ncomp_floor: 180000\ntarget_levels: [senior, dept-head]\nwork_arrangements: [remote]\n---\n",
+        )
+        .unwrap();
+        let out = render_targets(&c, "");
+        assert!(
+            out.contains("Founding Engineer"),
+            "target_titles must appear in rendered targets:\n{out}"
+        );
+        assert!(
+            out.contains("Head of Engineering"),
+            "all target_titles must appear:\n{out}"
+        );
+        assert!(
+            out.contains("target_titles:"),
+            "target_titles label must appear:\n{out}"
+        );
     }
 
     /// Stage-aware fake: one `Llm` can't return different bodies per stage, so key the canned
