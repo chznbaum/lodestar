@@ -25,4 +25,32 @@ describe("phaseLabel", () => {
   it("returns normal scrape label when careers-scrape running with no detail", () => {
     expect(phaseLabel("careers-scrape", "running", undefined)).toBe("Scraping careers page…");
   });
+
+  // Job-detail stages
+  it("returns 'Fetching the JD…' for jd-scrape running", () => {
+    expect(phaseLabel("jd-scrape", "running")).toBe("Fetching the JD…");
+  });
+  it("returns 'Reading the JD…' for structure-jd running", () => {
+    expect(phaseLabel("structure-jd", "running")).toBe("Reading the JD…");
+  });
+  it("returns 'Checking for gaps…' for gap-detect running", () => {
+    expect(phaseLabel("gap-detect", "running")).toBe("Checking for gaps…");
+  });
+  it("returns 'Researching gaps…' for research-gaps running", () => {
+    expect(phaseLabel("research-gaps", "running")).toBe("Researching gaps…");
+  });
+  it("returns 'Scoring fit…' for fit-score running", () => {
+    expect(phaseLabel("fit-score", "running")).toBe("Scoring fit…");
+  });
+  it("returns 'Writing the alignment…' for alignment running", () => {
+    expect(phaseLabel("alignment", "running")).toBe("Writing the alignment…");
+  });
+
+  // Stealth generalization: jd-scrape also triggers the stealth label
+  it("returns stealth label when jd-scrape running with detail=stealth", () => {
+    expect(phaseLabel("jd-scrape", "running", "stealth")).toBe("Retrying via stealth proxy…");
+  });
+  it("returns normal jd-scrape label when jd-scrape running with no detail", () => {
+    expect(phaseLabel("jd-scrape", "running", undefined)).toBe("Fetching the JD…");
+  });
 });
