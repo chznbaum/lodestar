@@ -4,14 +4,14 @@
 //! Recall-safe: a flag fires ONLY on a *known* conflict. Unknown fields on either
 //! side are skipped — a false dealbreaker is worse than a missed one.
 //!
-//! **Soft layer** — five 0–1 sub-scores combined into a 0–100 `score` via `score_fit`.
+//! **Soft layer** — five 0–100 integer sub-scores combined into a 0–100 `score` via `score_fit`.
 //! Any dealbreaker flag collapses the score to 0 (hard no — not a cap).
 //!
 //! Decay/penalty calibration constants (tunable):
-//! - Within-track seniority distance: 0→1.0, 1→0.6, 2→0.3, ≥3→0.1
-//! - Cross-track seniority mismatch: 0.1
-//! - Arrangement mismatch (known but not in list): 0.15
-//! - Skills split (required vs preferred): 0.8 / 0.2
+//! - Within-track seniority distance: 0→100, 1→60, 2→30, ≥3→10
+//! - Cross-track seniority mismatch: 10
+//! - Arrangement mismatch (known but not in list): 15
+//! - Skills split (required vs preferred): 80 / 20 (percent weights, sum 100)
 #![allow(dead_code)]
 
 use crate::competency::CompetencyIndex;
@@ -49,15 +49,15 @@ fn caution(check: &str, detail: impl Into<String>) -> Flag {
 
 // ── Soft scoring ────────────────────────────────────────────────────────────
 
-/// Output of `score_fit`: the five 0–1 sub-scores, the fired flags, and the
+/// Output of `score_fit`: the five 0–100 integer sub-scores, the fired flags, and the
 /// combined 0–100 score (0 when any dealbreaker fires).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FitBreakdown {
-    pub seniority: f64,
-    pub skills: f64,
-    pub comp: f64,
-    pub arrangement: f64,
-    pub domain: f64,
+    pub seniority: i64,
+    pub skills: i64,
+    pub comp: i64,
+    pub arrangement: i64,
+    pub domain: i64,
     pub flags: Vec<Flag>,
     pub score: i64,
 }
@@ -85,24 +85,25 @@ fn level_track(level: &str) -> Option<(Track, usize)> {
     }
 }
 
-/// Seniority fit sub-score (0–1).
+/// Seniority fit sub-score (0–100, integer).
 ///
 /// 1. Base level score from job level vs. targeted levels.
-/// 2. YOE reducer: scales base down proportionally when `candidate_yoe < yoe_min`.
-///    Unknown `yoe_min` or unknown candidate YOE (0.0) → no reduction.
+/// 2. YOE reducer: scales base down proportionally when candidate months < yoe_min*12.
+///    Unknown `yoe_min` or unknown candidate months (0) → no reduction.
+///    Formula: `factor = min(candidate_months*100 / (yoe_min*12), 100)`; `base * factor / 100`.
 pub(crate) fn seniority_fit(
     job_level: Option<&str>,
     targets: &[String],
     job_yoe_min: Option<i64>,
-    candidate_yoe: f64,
-) -> f64 {
+    candidate_months: i64,
+) -> i64 {
     // --- 1. Base level score ---
-    let base = match job_level.and_then(level_track) {
-        None => 0.5, // unknown level → neutral
+    let base: i64 = match job_level.and_then(level_track) {
+        None => 50, // unknown level → neutral
         Some((job_track, job_rank)) => {
             // Exact match?
             if job_level.is_some_and(|l| targets.iter().any(|t| t == l)) {
-                1.0
+                100
             } else {
                 // Collect valid-level targets and their tracks.
                 let target_tracks: Vec<(Track, usize)> =
@@ -110,7 +111,7 @@ pub(crate) fn seniority_fit(
 
                 if target_tracks.is_empty() {
                     // No seniority target set → neutral (don't penalize an unspecified preference).
-                    0.5
+                    50
                 } else {
                     // Is job's track among targeted tracks?
                     let same_track_targets: Vec<usize> = target_tracks
@@ -120,7 +121,7 @@ pub(crate) fn seniority_fit(
                         .collect();
 
                     if same_track_targets.is_empty() {
-                        0.1 // cross-track mismatch
+                        10 // cross-track mismatch
                     } else {
                         // Nearest same-track target by rank distance.
                         let min_dist = same_track_targets
@@ -129,10 +130,10 @@ pub(crate) fn seniority_fit(
                             .min()
                             .unwrap_or(usize::MAX);
                         match min_dist {
-                            0 => 1.0,
-                            1 => 0.6,
-                            2 => 0.3,
-                            _ => 0.1,
+                            0 => 100,
+                            1 => 60,
+                            2 => 30,
+                            _ => 10,
                         }
                     }
                 }
@@ -141,106 +142,108 @@ pub(crate) fn seniority_fit(
     };
 
     // --- 2. YOE reducer ---
-    let factor = if let Some(y) = job_yoe_min {
-        if y > 0 && candidate_yoe > 0.0 {
-            (candidate_yoe / y as f64).min(1.0)
+    // factor is 0–100 (percent); base * factor / 100 gives the reduced score.
+    let factor: i64 = if let Some(y) = job_yoe_min {
+        let yoe_months = y * 12;
+        if yoe_months > 0 && candidate_months > 0 {
+            (candidate_months * 100 / yoe_months).min(100)
         } else {
-            1.0
+            100
         }
     } else {
-        1.0
+        100
     };
 
-    base * factor
+    base * factor / 100
 }
 
-/// Skills fit sub-score (0–1).
+/// Skills fit sub-score (0–100, integer).
 ///
-/// Coverage = matched / total per list. Required dominates (0.8 / 0.2).
-/// Both empty → 0.5 (neutral).
+/// `coverage(list) = matched*100/len` (integer, 0–100).
+/// Required dominates: `(80*req_cov + 20*pref_cov)/100`.
+/// Both empty → 50 (neutral); one empty → the other's coverage.
 pub(crate) fn skills_fit(
     required: &[String],
     preferred: &[String],
     idx: &CompetencyIndex,
-) -> f64 {
-    let coverage = |list: &[String]| -> f64 {
+) -> i64 {
+    let coverage = |list: &[String]| -> i64 {
         if list.is_empty() {
-            return 0.0; // sentinel; callers check emptiness before using
+            return 0; // sentinel; callers check emptiness before using
         }
         let matched = list.iter().filter(|s| idx.matches(s)).count();
-        matched as f64 / list.len() as f64
+        (matched * 100 / list.len()) as i64
     };
 
     match (required.is_empty(), preferred.is_empty()) {
-        (true, true) => 0.5,
+        (true, true) => 50,
         (false, true) => coverage(required),
         (true, false) => coverage(preferred),
-        (false, false) => 0.8 * coverage(required) + 0.2 * coverage(preferred),
+        (false, false) => (80 * coverage(required) + 20 * coverage(preferred)) / 100,
     }
 }
 
-/// Comp fit sub-score (0–1).
+/// Comp fit sub-score (0–100, integer).
 ///
-/// Compares the job's band ceiling (`high`) against the candidate's floor and target.
-/// Unknown comp or floor → 0.5 (neutral).
-pub(crate) fn comp_fit(high: Option<i64>, floor: Option<i64>, target: Option<i64>) -> f64 {
+/// Both+target known & target>floor → `((high-floor)*100/(target-floor)).clamp(0,100)`.
+/// high&floor known, no target → `if high>=floor {100} else {0}`.
+/// Otherwise → 50 (neutral).
+pub(crate) fn comp_fit(high: Option<i64>, floor: Option<i64>, target: Option<i64>) -> i64 {
     match (high, floor, target) {
         (Some(h), Some(f), Some(t)) if t > f => {
-            ((h - f) as f64 / (t - f) as f64).clamp(0.0, 1.0)
+            ((h - f) * 100 / (t - f)).clamp(0, 100)
         }
         (Some(h), Some(f), _) => {
-            if h >= f {
-                1.0
-            } else {
-                0.0
-            }
+            if h >= f { 100 } else { 0 }
         }
-        _ => 0.5,
+        _ => 50,
     }
 }
 
-/// Arrangement fit sub-score (0–1).
+/// Arrangement fit sub-score (0–100, integer).
 ///
-/// `None` job remote → 0.5; match in list → 1.0; known and not in list → 0.15.
-pub(crate) fn arrangement_fit(job_remote: Option<&str>, work_arrangements: &[String]) -> f64 {
+/// `None` job remote → 50; match in list → 100; known and not in list → 15.
+pub(crate) fn arrangement_fit(job_remote: Option<&str>, work_arrangements: &[String]) -> i64 {
     match job_remote {
-        None => 0.5,
-        Some(r) if work_arrangements.iter().any(|a| a == r) => 1.0,
-        Some(_) => 0.15,
+        None => 50,
+        Some(r) if work_arrangements.iter().any(|a| a == r) => 100,
+        Some(_) => 15,
     }
 }
 
-/// Domain fit sub-score (0–1).
+/// Domain fit sub-score (0–100, integer).
 ///
-/// Avoid hit → 0.0; preferred hit → 1.0; preferred empty → 0.5; else 0.4.
+/// Avoid hit → 0; preferred hit → 100; no prefs → 50; else → 40.
 pub(crate) fn domain_fit(
     company_domains: &[String],
     preferred: &[String],
     avoid: &[String],
-) -> f64 {
+) -> i64 {
     if company_domains.iter().any(|d| avoid.contains(d)) {
-        return 0.0;
+        return 0;
     }
     if preferred.is_empty() {
-        return 0.5;
+        return 50;
     }
     if company_domains.iter().any(|d| preferred.contains(d)) {
-        1.0
+        100
     } else {
-        0.4
+        40
     }
 }
 
 /// Compute the full fit breakdown for a job against a candidate profile.
 ///
-/// Sub-scores are combined via `p.fit_weights`; any dealbreaker collapses `score` to 0.
+/// Sub-scores are `i64` 0–100. Combined via `p.fit_weights` (integer percents summing to 100).
+/// Formula: `score = (Σ wᵢ·sᵢ + 50) / 100` (round-to-nearest, integer division).
+/// Any dealbreaker flag collapses `score` to 0 (hard no — not a cap).
 pub fn score_fit(
     job: &Job,
     p: &TargetCriteria,
     company_domains: &[String],
     company_screening: Option<&str>,
     comps: &CompetencyIndex,
-    candidate_yoe: f64,
+    candidate_months: i64,
 ) -> FitBreakdown {
     let w = &p.fit_weights;
 
@@ -248,26 +251,26 @@ pub fn score_fit(
         job.level.as_deref(),
         &p.target_levels,
         job.yoe_min,
-        candidate_yoe,
+        candidate_months,
     );
     let skills = skills_fit(&job.required_skills, &job.preferred_skills, comps);
     let comp = comp_fit(job.comp_high.or(job.comp_low), p.comp_floor, p.comp_target);
     let arrangement = arrangement_fit(job.remote.as_deref(), &p.work_arrangements);
     let domain = domain_fit(company_domains, &p.preferred_domains, &p.avoid_domains);
 
-    let raw = 100.0
-        * (w.seniority * seniority
-            + w.skills * skills
-            + w.comp * comp
-            + w.arrangement * arrangement
-            + w.domain * domain);
+    // Round-to-nearest integer weighted mean: (Σ wᵢ·sᵢ + 50) / 100
+    let raw = w.seniority * seniority
+        + w.skills * skills
+        + w.comp * comp
+        + w.arrangement * arrangement
+        + w.domain * domain;
 
     let flags = hard_filters(job, p, company_screening);
 
     let score = if flags.iter().any(|f| f.level == FlagLevel::Dealbreaker) {
         0
     } else {
-        raw.round() as i64
+        (raw + 50) / 100
     };
 
     FitBreakdown {
@@ -744,170 +747,178 @@ mod tests {
 
     #[test]
     fn seniority_exact_match_in_targets() {
-        // "senior" in [senior, dept-head] → 1.0
+        // "senior" in [senior, dept-head] → 100
         assert_eq!(
-            seniority_fit(Some("senior"), &["senior".into(), "dept-head".into()], None, 0.0),
-            1.0
+            seniority_fit(Some("senior"), &["senior".into(), "dept-head".into()], None, 0),
+            100
         );
     }
 
     #[test]
     fn seniority_exact_match_mgmt() {
-        // "dept-head" in [senior, dept-head] → 1.0
+        // "dept-head" in [senior, dept-head] → 100
         assert_eq!(
-            seniority_fit(Some("dept-head"), &["senior".into(), "dept-head".into()], None, 0.0),
-            1.0
+            seniority_fit(Some("dept-head"), &["senior".into(), "dept-head".into()], None, 0),
+            100
         );
     }
 
     #[test]
-    fn seniority_within_track_dist1() {
-        // "mid" vs [senior] → IC track, dist 1 → 0.6
+    fn seniority_within_track_dist1_is_60() {
+        // "mid" vs [senior] → IC track, dist 1 → 60
         assert_eq!(
-            seniority_fit(Some("mid"), &["senior".into()], None, 0.0),
-            0.6
+            seniority_fit(Some("mid"), &["senior".into()], None, 0),
+            60
         );
     }
 
     #[test]
-    fn seniority_cross_track() {
-        // "front-line-mgmt" vs [senior] (IC-only targets) → cross-track → 0.1
+    fn seniority_within_track_dist2_is_30() {
+        // "junior" vs [senior] → IC track, dist 2 → 30
         assert_eq!(
-            seniority_fit(Some("front-line-mgmt"), &["senior".into()], None, 0.0),
-            0.1
+            seniority_fit(Some("junior"), &["senior".into()], None, 0),
+            30
         );
     }
 
     #[test]
-    fn seniority_unknown_level() {
-        // unknown level → 0.5
+    fn seniority_cross_track_is_10() {
+        // "front-line-mgmt" vs [senior] (IC-only targets) → cross-track → 10
         assert_eq!(
-            seniority_fit(None, &["senior".into()], None, 0.0),
-            0.5
+            seniority_fit(Some("front-line-mgmt"), &["senior".into()], None, 0),
+            10
+        );
+    }
+
+    #[test]
+    fn seniority_unknown_level_is_50() {
+        // unknown level → 50
+        assert_eq!(
+            seniority_fit(None, &["senior".into()], None, 0),
+            50
         );
     }
 
     #[test]
     fn seniority_empty_targets_is_neutral() {
-        // No target_levels set → profile-side unknown → neutral 0.5 (not a cross-track penalty).
-        assert_eq!(seniority_fit(Some("senior"), &[], None, 0.0), 0.5);
-        assert_eq!(seniority_fit(Some("dept-head"), &[], None, 0.0), 0.5);
+        // No target_levels set → profile-side unknown → neutral 50 (not a cross-track penalty).
+        assert_eq!(seniority_fit(Some("senior"), &[], None, 0), 50);
+        assert_eq!(seniority_fit(Some("dept-head"), &[], None, 0), 50);
     }
 
     #[test]
     fn seniority_yoe_reducer_scales_down() {
-        // "senior" exact match, base=1.0; yoe_min=10, candidate=5 → factor=0.5 → 0.5
+        // "senior" exact match, base=100; yoe_min=10 yrs → 120 months, candidate=60 months
+        // factor = min(60*100/120, 100) = min(50, 100) = 50 → 100*50/100 = 50
         assert_eq!(
-            seniority_fit(Some("senior"), &["senior".into()], Some(10), 5.0),
-            0.5
+            seniority_fit(Some("senior"), &["senior".into()], Some(10), 60),
+            50
         );
     }
 
     #[test]
     fn seniority_yoe_reducer_unknown_candidate_no_reduction() {
-        // candidate_yoe=0.0 means unknown → no reduction → 1.0
+        // candidate_months=0 means unknown → no reduction → 100
         assert_eq!(
-            seniority_fit(Some("senior"), &["senior".into()], Some(10), 0.0),
-            1.0
+            seniority_fit(Some("senior"), &["senior".into()], Some(10), 0),
+            100
         );
     }
 
     #[test]
     fn seniority_yoe_no_yoe_min_no_reduction() {
-        // no yoe_min → factor=1.0 → no reduction
+        // no yoe_min → factor=100 → no reduction
         assert_eq!(
-            seniority_fit(Some("senior"), &["senior".into()], None, 5.0),
-            1.0
+            seniority_fit(Some("senior"), &["senior".into()], None, 60),
+            100
         );
     }
 
     // --- skills_fit ---
 
     #[test]
-    fn skills_required_partial_and_preferred_miss() {
-        // required: [rust(match), go(miss)]; preferred: [k8s(miss)]
-        // req_cov = 0.5, pref_cov = 0.0 → 0.8*0.5 + 0.2*0.0 = 0.4
+    fn skills_required_partial_and_preferred_miss_is_40() {
+        // required: [rust(match), go(miss)] cov=50; pref: [k8s(miss)] cov=0
+        // (80*50 + 20*0)/100 = 40
         let idx = rust_idx();
-        let score = skills_fit(
-            &["rust".into(), "go".into()],
-            &["k8s".into()],
-            &idx,
+        assert_eq!(
+            skills_fit(&["rust".into(), "go".into()], &["k8s".into()], &idx),
+            40
         );
-        assert!((score - 0.4).abs() < 1e-9, "expected 0.4, got {score}");
     }
 
     #[test]
-    fn skills_all_required_matched_no_preferred() {
+    fn skills_all_required_matched_no_preferred_is_100() {
         let idx = rust_idx();
         assert_eq!(
             skills_fit(&["rust".into()], &[], &idx),
-            1.0
+            100
         );
     }
 
     #[test]
-    fn skills_both_empty() {
+    fn skills_both_empty_is_50() {
         let idx = rust_idx();
-        assert_eq!(skills_fit(&[], &[], &idx), 0.5);
+        assert_eq!(skills_fit(&[], &[], &idx), 50);
     }
 
     // --- comp_fit ---
 
     #[test]
-    fn comp_at_target() {
-        // high=220k, floor=180k, target=220k → (220k-180k)/(220k-180k)=1.0
-        assert_eq!(comp_fit(Some(220_000), Some(180_000), Some(220_000)), 1.0);
+    fn comp_at_target_is_100() {
+        // high=220k, floor=180k, target=220k → (220k-180k)/(220k-180k)*100 = 100
+        assert_eq!(comp_fit(Some(220_000), Some(180_000), Some(220_000)), 100);
     }
 
     #[test]
-    fn comp_midway() {
-        // high=200k, floor=180k, target=220k → (200k-180k)/(220k-180k) = 20/40 = 0.5
-        assert_eq!(comp_fit(Some(200_000), Some(180_000), Some(220_000)), 0.5);
+    fn comp_midway_is_50() {
+        // high=200k, floor=180k, target=220k → (200k-180k)/(220k-180k) = 20/40 = 50
+        assert_eq!(comp_fit(Some(200_000), Some(180_000), Some(220_000)), 50);
     }
 
     #[test]
-    fn comp_unknown() {
-        assert_eq!(comp_fit(None, None, None), 0.5);
+    fn comp_unknown_is_50() {
+        assert_eq!(comp_fit(None, None, None), 50);
     }
 
     // --- arrangement_fit ---
 
     #[test]
-    fn arrangement_remote_in_list() {
-        assert_eq!(arrangement_fit(Some("remote"), &["remote".into()]), 1.0);
+    fn arrangement_remote_in_list_is_100() {
+        assert_eq!(arrangement_fit(Some("remote"), &["remote".into()]), 100);
     }
 
     #[test]
-    fn arrangement_onsite_not_in_list() {
-        assert_eq!(arrangement_fit(Some("onsite"), &["remote".into()]), 0.15);
+    fn arrangement_onsite_not_in_list_is_15() {
+        assert_eq!(arrangement_fit(Some("onsite"), &["remote".into()]), 15);
     }
 
     #[test]
-    fn arrangement_none_neutral() {
-        assert_eq!(arrangement_fit(None, &["remote".into()]), 0.5);
+    fn arrangement_none_neutral_is_50() {
+        assert_eq!(arrangement_fit(None, &["remote".into()]), 50);
     }
 
     // --- domain_fit ---
 
     #[test]
-    fn domain_preferred_hit() {
+    fn domain_preferred_hit_is_100() {
         assert_eq!(
             domain_fit(&["dev_tools".into()], &["dev_tools".into()], &[]),
-            1.0
+            100
         );
     }
 
     #[test]
-    fn domain_avoid_hit() {
+    fn domain_avoid_hit_is_0() {
         assert_eq!(
             domain_fit(&["gambling".into()], &["dev_tools".into()], &["gambling".into()]),
-            0.0
+            0
         );
     }
 
     #[test]
-    fn domain_no_prefs() {
-        assert_eq!(domain_fit(&["fintech".into()], &[], &[]), 0.5);
+    fn domain_no_prefs_is_50() {
+        assert_eq!(domain_fit(&["fintech".into()], &[], &[]), 50);
     }
 
     // --- score_fit ---
@@ -933,19 +944,19 @@ mod tests {
             preferred_domains: vec!["dev_tools".into()],
             ..base_profile()
         };
-        let bd = score_fit(&job, &profile, &["dev_tools".into()], None, &idx, 7.0);
+        let bd = score_fit(&job, &profile, &["dev_tools".into()], None, &idx, 84);
         // No dealbreakers → score > 0
         assert!(bd.score > 0, "expected positive score, got {}", bd.score);
         assert!(bd.flags.iter().all(|f| f.level != FlagLevel::Dealbreaker));
-        // Verify it equals round(100 * weighted sum) with default weights
+        // Verify integer weighted mean: (Σ wᵢ·sᵢ + 50) / 100
         let w = &profile.fit_weights;
-        let expected = (100.0
-            * (w.seniority * bd.seniority
-                + w.skills * bd.skills
-                + w.comp * bd.comp
-                + w.arrangement * bd.arrangement
-                + w.domain * bd.domain))
-            .round() as i64;
+        let expected = (w.seniority * bd.seniority
+            + w.skills * bd.skills
+            + w.comp * bd.comp
+            + w.arrangement * bd.arrangement
+            + w.domain * bd.domain
+            + 50)
+            / 100;
         assert_eq!(bd.score, expected);
     }
 
@@ -970,7 +981,7 @@ mod tests {
             work_arrangements: vec!["remote".into()],
             ..base_profile()
         };
-        let bd = score_fit(&job, &profile, &[], None, &idx, 10.0);
+        let bd = score_fit(&job, &profile, &[], None, &idx, 120);
         assert_eq!(
             bd.score, 0,
             "dealbreaker should collapse score to 0, got {}",

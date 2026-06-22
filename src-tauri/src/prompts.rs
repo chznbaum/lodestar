@@ -883,8 +883,8 @@ pursuing with specific caveats, or probably a pass — and the single biggest re
 
     let user = format!(
         "## Fit breakdown\n\
-Sub-scores (0–1):\n\
-  seniority: {seniority:.2}  |  skills: {skills:.2}  |  comp: {comp:.2}  |  arrangement: {arrangement:.2}  |  domain: {domain:.2}\n\
+Sub-scores (0–100):\n\
+  seniority: {seniority}  |  skills: {skills}  |  comp: {comp}  |  arrangement: {arrangement}  |  domain: {domain}\n\
 Overall score: {score}/100\n\
 Flags:\n\
 {flags_section}\n\n\
@@ -1578,11 +1578,11 @@ mod tests {
 
         let job = base_job_for_alignment();
         let breakdown = FitBreakdown {
-            seniority: 1.0,
-            skills: 0.6,
-            comp: 0.8,
-            arrangement: 1.0,
-            domain: 0.5,
+            seniority: 100,
+            skills: 60,
+            comp: 80,
+            arrangement: 100,
+            domain: 50,
             flags: vec![],
             score: 74,
         };
@@ -1634,6 +1634,16 @@ mod tests {
             sys_lower.contains("not json") || sys_lower.contains("no json"),
             "system must explicitly forbid JSON output"
         );
+        // Sub-scores are integers (0–100): the header must use that label.
+        assert!(
+            req.user.contains("Sub-scores (0–100)"),
+            "user message must contain the 'Sub-scores (0–100)' header"
+        );
+        // A sub-score renders as a plain integer (not a float or decimal).
+        assert!(
+            req.user.contains("seniority: 100"),
+            "user message must render seniority sub-score as the integer 100"
+        );
     }
 
     #[test]
@@ -1642,11 +1652,11 @@ mod tests {
 
         let job = base_job_for_alignment();
         let breakdown = FitBreakdown {
-            seniority: 0.3,
-            skills: 0.5,
-            comp: 0.0,
-            arrangement: 1.0,
-            domain: 0.4,
+            seniority: 30,
+            skills: 50,
+            comp: 0,
+            arrangement: 100,
+            domain: 40,
             flags: vec![Flag {
                 check: "comp_floor".to_string(),
                 level: FlagLevel::Dealbreaker,
@@ -1716,11 +1726,11 @@ mod tests {
 
         let job = base_job_for_alignment();
         let breakdown = FitBreakdown {
-            seniority: 1.0,
-            skills: 0.8,
-            comp: 1.0,
-            arrangement: 1.0,
-            domain: 0.5,
+            seniority: 100,
+            skills: 80,
+            comp: 100,
+            arrangement: 100,
+            domain: 50,
             flags: vec![],
             score: 88,
         };
@@ -1803,7 +1813,7 @@ mod tests {
 
         let job = base_job_for_alignment();
         let breakdown = FitBreakdown {
-            seniority: 1.0, skills: 0.6, comp: 0.8, arrangement: 1.0, domain: 0.5,
+            seniority: 100, skills: 60, comp: 80, arrangement: 100, domain: 50,
             flags: vec![], score: 74,
         };
         let exps = vec![Experience {
@@ -1862,7 +1872,7 @@ mod tests {
         job.researched = vec!["comp_low".to_string(), "comp_high".to_string()];
 
         let breakdown = FitBreakdown {
-            seniority: 1.0, skills: 0.6, comp: 0.8, arrangement: 1.0, domain: 0.5,
+            seniority: 100, skills: 60, comp: 80, arrangement: 100, domain: 50,
             flags: vec![], score: 74,
         };
         let inp = AlignmentInputs {
@@ -1904,7 +1914,7 @@ mod tests {
         job.relocation = Some("offered".to_string());
         job.location = Some("Austin, TX".to_string());
         let breakdown = FitBreakdown {
-            seniority: 0.6, skills: 0.5, comp: 0.5, arrangement: 0.15, domain: 0.5,
+            seniority: 60, skills: 50, comp: 50, arrangement: 15, domain: 50,
             flags: vec![], score: 45,
         };
         let inp = AlignmentInputs {
@@ -1936,7 +1946,7 @@ mod tests {
         job.comp_high = Some(200_000);
         // no comp_currency, no comp_period
         let breakdown = FitBreakdown {
-            seniority: 0.5, skills: 0.5, comp: 0.5, arrangement: 0.5, domain: 0.5,
+            seniority: 50, skills: 50, comp: 50, arrangement: 50, domain: 50,
             flags: vec![], score: 50,
         };
         let inp = AlignmentInputs {
@@ -1957,7 +1967,7 @@ mod tests {
         use crate::fit::FitBreakdown;
         let job = base_job_for_alignment();
         let breakdown = FitBreakdown {
-            seniority: 1.0, skills: 0.6, comp: 0.8, arrangement: 1.0, domain: 0.5,
+            seniority: 100, skills: 60, comp: 80, arrangement: 100, domain: 50,
             flags: vec![], score: 74,
         };
         let inp = AlignmentInputs {
@@ -2011,7 +2021,7 @@ mod tests {
     fn alignment_prompt_is_not_web() {
         use crate::fit::FitBreakdown;
         let job = base_job_for_alignment();
-        let breakdown = FitBreakdown { seniority: 1.0, skills: 1.0, comp: 1.0, arrangement: 1.0, domain: 1.0, flags: vec![], score: 100 };
+        let breakdown = FitBreakdown { seniority: 100, skills: 100, comp: 100, arrangement: 100, domain: 100, flags: vec![], score: 100 };
         let inp = AlignmentInputs {
             job: &job,
             jd_sanitized: "<<<SCRAPED_DATA>>>jd<<<END_SCRAPED_DATA>>>",

@@ -1184,8 +1184,8 @@ fn dispatch_non_scrape<L: Llm>(
                 &crate::competency::list_competencies(vault_path)?,
             );
 
-            // Candidate YOE from experience date-spans.
-            let yoe = crate::experience::total_years_experience(
+            // Candidate months of experience from experience date-spans (integer, for the fit rubric).
+            let candidate_months = crate::experience::total_months_experience(
                 &crate::experience::list_experiences(vault_path)?,
                 today,
             );
@@ -1196,7 +1196,7 @@ fn dispatch_non_scrape<L: Llm>(
                 &company_domains,
                 company_screening.as_deref(),
                 &idx,
-                yoe,
+                candidate_months,
             );
 
             update_job_field(
@@ -2734,7 +2734,7 @@ mod tests {
         let slug = "senior-engineer-acme";
         let stub = "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/1\njd_raw_file: jobs/_jd/senior-engineer-acme.md\nstatus: new\n---\n";
         let bd = crate::fit::FitBreakdown {
-            seniority: 0.5, skills: 0.5, comp: 0.5, arrangement: 0.5, domain: 0.5,
+            seniority: 50, skills: 50, comp: 50, arrangement: 50, domain: 50,
             flags: vec![], score: 50,
         };
         let payload =

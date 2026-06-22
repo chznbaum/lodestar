@@ -9,24 +9,26 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// Per-dimension weights used for scoring jobs against the user's criteria.
-/// All five weights must sum to 1.0. `Default` returns the recommended baseline.
+/// All five weights are integer percents summing to 100. `Default` returns the recommended baseline.
+/// These are tuning parameters with sane defaults — not intended to be hand-edited in the vault
+/// unless you have a specific comp-driven or domain-driven preference to express.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct FitWeights {
-    pub seniority: f64,
-    pub skills: f64,
-    pub comp: f64,
-    pub arrangement: f64,
-    pub domain: f64,
+    pub seniority: i64,
+    pub skills: i64,
+    pub comp: i64,
+    pub arrangement: i64,
+    pub domain: i64,
 }
 
 impl Default for FitWeights {
     fn default() -> Self {
         Self {
-            seniority: 0.20,
-            skills: 0.25,
-            comp: 0.30,
-            arrangement: 0.15,
-            domain: 0.10,
+            seniority: 20,
+            skills: 25,
+            comp: 30,
+            arrangement: 15,
+            domain: 10,
         }
     }
 }
@@ -155,7 +157,7 @@ mod tests {
 
     const FIXTURE: &str = "---\ntype: target_criteria\nwork_arrangements: [remote]\nmatch_titles:\n  - founding engineer\n  - ai engineer\n---\n\nbody\n";
 
-    const FULL: &str = "---\ntype: target_criteria\nwork_arrangements: [remote]\ntarget_titles: [\"Founding Engineer\", \"Senior Software Engineer\"]\nmatch_titles:\n  - founding engineer\ntarget_levels: [senior, dept-head]\ncomp_floor: 180000\ncomp_target: 220000\ncomp_currency: USD\nemployment_types: [full_time, fractional]\nopen_to_relocation: false\nwork_authorization: [US]\nrequires_sponsorship: false\npreferred_domains: [dev_tools]\navoid_domains: [gambling]\nfit_weights: { seniority: 0.25, skills: 0.4, comp: 0.25, arrangement: 0.0, domain: 0.1 }\n---\n";
+    const FULL: &str = "---\ntype: target_criteria\nwork_arrangements: [remote]\ntarget_titles: [\"Founding Engineer\", \"Senior Software Engineer\"]\nmatch_titles:\n  - founding engineer\ntarget_levels: [senior, dept-head]\ncomp_floor: 180000\ncomp_target: 220000\ncomp_currency: USD\nemployment_types: [full_time, fractional]\nopen_to_relocation: false\nwork_authorization: [US]\nrequires_sponsorship: false\npreferred_domains: [dev_tools]\navoid_domains: [gambling]\nfit_weights: { seniority: 25, skills: 40, comp: 25, arrangement: 0, domain: 10 }\n---\n";
 
     #[test]
     fn parses_match_titles_and_work_arrangements() {
@@ -192,7 +194,14 @@ mod tests {
         assert_eq!(c.work_authorization, vec!["US"]);
         assert!(!c.requires_sponsorship);
         assert_eq!(c.avoid_domains, vec!["gambling"]);
-        assert!((c.fit_weights.skills - 0.4).abs() < 1e-9);
+        assert_eq!(c.fit_weights.skills, 40);
+        assert_eq!(c.fit_weights.seniority, 25);
+        assert_eq!(c.fit_weights.comp, 25);
+        assert_eq!(c.fit_weights.arrangement, 0);
+        assert_eq!(c.fit_weights.domain, 10);
+        let sum = c.fit_weights.seniority + c.fit_weights.skills + c.fit_weights.comp
+            + c.fit_weights.arrangement + c.fit_weights.domain;
+        assert_eq!(sum, 100, "fit_weights must sum to 100; got {sum}");
         assert_eq!(
             c.target_titles,
             vec!["Founding Engineer".to_string(), "Senior Software Engineer".to_string()]
@@ -218,15 +227,26 @@ mod tests {
     }
 
     #[test]
-    fn fit_weights_default_when_absent_sum_to_one() {
+    fn fit_weights_default_when_absent_sum_to_100() {
         let c = parse_target_criteria("---\ntype: target_criteria\n---\n").unwrap();
         let w = &c.fit_weights;
-        assert!(
-            (w.seniority + w.skills + w.comp + w.arrangement + w.domain - 1.0).abs() < 1e-9,
-            "weights sum to {}, not 1.0",
-            w.seniority + w.skills + w.comp + w.arrangement + w.domain
+        let sum = w.seniority + w.skills + w.comp + w.arrangement + w.domain;
+        assert_eq!(
+            sum, 100,
+            "default weights sum to {sum}, not 100"
         );
         assert!(c.target_levels.is_empty()); // safe defaults
+    }
+
+    #[test]
+    fn fit_weights_default_values() {
+        let w = FitWeights::default();
+        assert_eq!(w.seniority, 20);
+        assert_eq!(w.skills, 25);
+        assert_eq!(w.comp, 30);
+        assert_eq!(w.arrangement, 15);
+        assert_eq!(w.domain, 10);
+        assert_eq!(w.seniority + w.skills + w.comp + w.arrangement + w.domain, 100);
     }
 
     // ── list_accomplishments ───────────────────────────────────────────────────

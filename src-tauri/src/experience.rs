@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::note::{self, split_frontmatter};
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -82,6 +82,48 @@ pub fn list_experiences(vault_path: &str) -> Result<Vec<Experience>, String> {
 /// unparseable or missing input (recall-safe — never panics).
 fn parse_ym(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(&format!("{s}-01"), "%Y-%m-%d").ok()
+}
+
+/// Total career span in whole months, computed as earliest-start → latest-end across
+/// all experiences. Gaps and overlaps are ignored (it's the envelope, not summed segments).
+///
+/// - Roles whose `start_date` cannot be parsed are excluded from the earliest-start
+///   calculation (they contribute nothing).
+/// - `is_current` roles contribute `today` as their end; all others contribute their
+///   parsed `end_date` (skipped if unparseable).
+/// - If no valid start dates exist → `0`.
+/// - If `latest <= earliest` → `0`.
+pub fn total_months_experience(exps: &[Experience], today: NaiveDate) -> i64 {
+    let starts: Vec<NaiveDate> = exps
+        .iter()
+        .filter_map(|e| e.start_date.as_deref().and_then(parse_ym))
+        .collect();
+
+    let Some(earliest) = starts.iter().copied().min() else {
+        return 0;
+    };
+
+    let ends: Vec<NaiveDate> = exps
+        .iter()
+        .filter_map(|e| {
+            if e.is_current {
+                Some(today)
+            } else {
+                e.end_date.as_deref().and_then(parse_ym)
+            }
+        })
+        .collect();
+
+    let latest = ends.iter().copied().max().unwrap_or(today);
+
+    if latest <= earliest {
+        return 0;
+    }
+
+    // Count whole months: each full calendar month between earliest and latest.
+    let years = latest.year() as i64 - earliest.year() as i64;
+    let months = latest.month() as i64 - earliest.month() as i64;
+    years * 12 + months
 }
 
 /// Total career span in fractional years, computed as earliest-start → latest-end across
@@ -224,6 +266,45 @@ mod tests {
     fn empty_slice_returns_zero() {
         let today = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
         assert_eq!(total_years_experience(&[], today), 0.0);
+    }
+
+    // ── total_months_experience ───────────────────────────────────────────────
+
+    #[test]
+    fn months_current_role_from_2018_01_to_2025_01_is_84() {
+        let exps = vec![make_exp("role-a", Some("2018-01"), None, true, vec![])];
+        let today = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+        // 2018-01 to 2025-01 = 7 years = 84 months
+        assert_eq!(total_months_experience(&exps, today), 84);
+    }
+
+    #[test]
+    fn months_exact_count_across_roles() {
+        // role-a: 2010-03 to 2012-06 (past)
+        // role-b: 2018-01 to 2026-06 (today = 2026-06-20, same month)
+        let exps = vec![
+            make_exp("role-a", Some("2010-03"), Some("2012-06"), false, vec![]),
+            make_exp("role-b", Some("2018-01"), None, true, vec![]),
+        ];
+        let today = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
+        // earliest = 2010-03, latest = 2026-06 → (2026-2010)*12 + (6-3) = 16*12 + 3 = 195
+        assert_eq!(total_months_experience(&exps, today), 195);
+    }
+
+    #[test]
+    fn months_empty_slice_returns_zero() {
+        let today = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
+        assert_eq!(total_months_experience(&[], today), 0);
+    }
+
+    #[test]
+    fn months_only_undated_roles_returns_zero() {
+        let exps = vec![
+            make_exp("a", None, None, false, vec![]),
+            make_exp("b", None, None, true, vec![]),
+        ];
+        let today = NaiveDate::from_ymd_opt(2026, 6, 20).unwrap();
+        assert_eq!(total_months_experience(&exps, today), 0);
     }
 
     // ── parse_experience ──────────────────────────────────────────────────────
