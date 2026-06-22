@@ -29,8 +29,9 @@
 use crate::check::{get_check, write_check, Check};
 use crate::config::{model_for, PipelineConfig};
 use crate::job::{
-    job_slug, list_jobs, parse_job, set_job_list_field, set_job_section, update_job_field,
-    write_job_stub, Job, COMP_PERIODS, EMPLOYMENT_TYPES, REMOTE_KINDS, SPONSORSHIP, VALID_LEVELS,
+    advance_job_status, job_slug, list_jobs, parse_job, set_job_list_field, set_job_section,
+    update_job_field, write_job_stub, Job, COMP_PERIODS, EMPLOYMENT_TYPES, REMOTE_KINDS,
+    SPONSORSHIP, VALID_LEVELS,
 };
 use crate::llm::Llm;
 use crate::pipeline::filter::{prefilter, RawListing};
@@ -336,6 +337,57 @@ pub fn start_job_detail_runs(
             });
             continue;
         }
+
+        // Read the job note (once) to check status validity and the decided guard. A missing or
+        // unreadable note degrades gracefully: the status checks are skipped and downstream
+        // (start_job_detail) handles it with its own error. A readable note with an absent or
+        // unrecognized status is a data anomaly → failed bucket; do NOT start the fetch.
+        {
+            let note_path = std::path::Path::new(vault_path)
+                .join("jobs")
+                .join(format!("{slug}.md"));
+            match std::fs::read_to_string(&note_path) {
+                Ok(text) => match parse_job(slug, &text) {
+                    Ok(job) => {
+                        match job.status.as_deref() {
+                            // Absent status → data anomaly.
+                            None => {
+                                failed.push(SlugError {
+                                    slug: slug.clone(),
+                                    error: format!(
+                                        "job {slug:?} has no status field; fix before fetching"
+                                    ),
+                                });
+                                continue;
+                            }
+                            // Unrecognized status → data anomaly.
+                            Some(s) if !crate::job::JOB_STATUSES.contains(&s) => {
+                                failed.push(SlugError {
+                                    slug: slug.clone(),
+                                    error: format!(
+                                        "job {slug:?} has missing/unknown status {s:?}; fix before fetching"
+                                    ),
+                                });
+                                continue;
+                            }
+                            // Human decision → skip (not an anomaly).
+                            Some("selected") | Some("applied") | Some("skipped") => {
+                                skipped.push(SlugSkip {
+                                    slug: slug.clone(),
+                                    reason: "a decision has already been made for this job".into(),
+                                });
+                                continue;
+                            }
+                            // Valid machine state → fall through to start.
+                            Some(_) => {}
+                        }
+                    }
+                    Err(_) => {} // parse error → not decided, not checked; let downstream handle it
+                },
+                Err(_) => {} // missing note → let downstream handle it
+            }
+        }
+
         match start_job_detail(queue, vault_path, slug, today) {
             Ok(run_id) => {
                 started.push(RunStart { slug: slug.clone(), run_id });
@@ -892,6 +944,11 @@ fn dispatch_non_scrape<L: Llm>(
                     ats: listing.ats.clone(),
                     tech_stack: vec![],
                     fit_score: None,
+                    fit_seniority: None,
+                    fit_skills: None,
+                    fit_comp: None,
+                    fit_arrangement: None,
+                    fit_domain: None,
                     researched: vec![],
                     status: Some("new".to_string()),
                     skip_reason: None,
@@ -943,6 +1000,8 @@ fn dispatch_non_scrape<L: Llm>(
                 }
             };
             let warnings = write_jd_fields(vault_path, &p.slug, &jd)?;
+            // Advance status to "detailed" now that the JD has been structured and written.
+            advance_job_status(vault_path, &p.slug, "detailed")?;
             if warnings.is_empty() {
                 record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "ok", None, cost)?;
             } else {
@@ -1205,11 +1264,42 @@ fn dispatch_non_scrape<L: Llm>(
                 "fit_score".into(),
                 bd.score.to_string(),
             )?;
-            // Flags are informational; they NEVER change `status` (human-owned). Written only when
-            // something fired.
+            update_job_field(
+                vault_path.to_string(),
+                slug.to_string(),
+                "fit_seniority".into(),
+                bd.seniority.to_string(),
+            )?;
+            update_job_field(
+                vault_path.to_string(),
+                slug.to_string(),
+                "fit_skills".into(),
+                bd.skills.to_string(),
+            )?;
+            update_job_field(
+                vault_path.to_string(),
+                slug.to_string(),
+                "fit_comp".into(),
+                bd.comp.to_string(),
+            )?;
+            update_job_field(
+                vault_path.to_string(),
+                slug.to_string(),
+                "fit_arrangement".into(),
+                bd.arrangement.to_string(),
+            )?;
+            update_job_field(
+                vault_path.to_string(),
+                slug.to_string(),
+                "fit_domain".into(),
+                bd.domain.to_string(),
+            )?;
+            // Flags are informational; written only when something fired.
             if !bd.flags.is_empty() {
                 set_job_section(vault_path, slug, "## Fit flags", &render_fit_flags(&bd.flags))?;
             }
+            // Advance status to "scored" now that a fit score has been computed and written.
+            advance_job_status(vault_path, slug, "scored")?;
             // Deterministic — no spend, so no cost recorded.
             record_step(vault_path, run_id, "fit-score", "script", slug, started, "ok", None, None)?;
 
@@ -2693,12 +2783,18 @@ mod tests {
         let txt = std::fs::read_to_string(dir.join(format!("jobs/{slug}.md"))).unwrap();
         let j = crate::job::parse_job(slug, &txt).unwrap();
         assert_eq!(j.fit_score, Some(0), "dealbroken role must score 0; note:\n{txt}");
+        // Sub-scores must be persisted for every fit-score run (including dealbroken).
+        assert!(j.fit_seniority.is_some(), "fit_seniority must be written; note:\n{txt}");
+        assert!(j.fit_skills.is_some(), "fit_skills must be written; note:\n{txt}");
+        assert!(j.fit_comp.is_some(), "fit_comp must be written; note:\n{txt}");
+        assert!(j.fit_arrangement.is_some(), "fit_arrangement must be written; note:\n{txt}");
+        assert!(j.fit_domain.is_some(), "fit_domain must be written; note:\n{txt}");
         assert!(txt.contains("## Fit flags"), "must write a Fit flags section:\n{txt}");
         assert!(
             txt.contains("DEALBREAKER") && txt.contains("comp_floor"),
             "flags must mark the comp_floor dealbreaker:\n{txt}"
         );
-        assert_eq!(j.status.as_deref(), Some("new"), "fit-score must not touch status");
+        assert_eq!(j.status.as_deref(), Some("scored"), "fit-score must advance status to scored (even dealbroken)");
 
         let run = get_check(vault.clone(), run_id).unwrap();
         assert!(
@@ -2865,6 +2961,14 @@ mod tests {
         let txt = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
         let j = crate::job::parse_job("senior-engineer-acme", &txt).unwrap();
         assert!(j.fit_score.is_some(), "fit_score must be written; note:\n{txt}");
+        // All five sub-scores must be persisted alongside fit_score.
+        assert!(j.fit_seniority.is_some(), "fit_seniority must be written; note:\n{txt}");
+        assert!(j.fit_skills.is_some(), "fit_skills must be written; note:\n{txt}");
+        assert!(j.fit_comp.is_some(), "fit_comp must be written; note:\n{txt}");
+        assert!(j.fit_arrangement.is_some(), "fit_arrangement must be written; note:\n{txt}");
+        assert!(j.fit_domain.is_some(), "fit_domain must be written; note:\n{txt}");
+        // fit-score must advance status to "scored".
+        assert_eq!(j.status.as_deref(), Some("scored"), "fit-score must advance job status to scored; note:\n{txt}");
         assert!(
             txt.contains("## Alignment analysis") && txt.contains("Worth pursuing"),
             "alignment narrative must be written:\n{txt}"
@@ -3055,6 +3159,132 @@ mod tests {
         assert_eq!(r2.status, "complete", "a terminal run must be left untouched");
 
         assert!(q.claim_next().unwrap().is_none(), "the aborted run's outstanding task is discarded");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── Status state machine (Task 2) ────────────────────────────────────────
+
+    /// After structure-jd succeeds, the job's status must be advanced to "detailed".
+    #[test]
+    fn structure_jd_advances_status_to_detailed() {
+        use crate::llm::tests::FakeLlm;
+        use crate::scraper::tests::FakeScraper;
+
+        let dir = job_detail_fixture_vault();
+        let vault = dir.to_str().unwrap();
+        let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let _run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-19").unwrap();
+
+        let scraper = FakeScraper { content: "<p>JD</p>".into(), credits: 5 };
+        let llm = FakeLlm {
+            reply: r#"{"comp_low":180000,"comp_high":220000,"comp_currency":"USD","comp_period":"annual",
+              "required_skills":["rust"],"remote":"remote","role_brief":"Build platform.","must_haves":"5y"}"#.into(),
+            cost_micro_usd: 1000,
+        };
+        let cfg = default_config();
+        // Pump through scrape + structure-jd; drain stops at gap-detect or later.
+        while pump_once(&queue, vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let txt = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
+        let j = crate::job::parse_job("senior-engineer-acme", &txt).unwrap();
+        assert_eq!(j.status.as_deref(), Some("detailed"),
+            "structure-jd must advance status to 'detailed'; note:\n{txt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A slug whose job.status is one of the decided states (selected/applied/skipped) must land
+    /// in the `skipped` bucket with a decision reason — not started.
+    #[test]
+    fn start_job_detail_runs_skips_decided_jobs() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-decided-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        // Three decided statuses + one undecided.
+        std::fs::write(dir.join("jobs/job-sel.md"), "---\nid: job-sel\ntitle: A\ncompany: \"[[acme]]\"\nurl: https://acme.com/a\nstatus: selected\n---\n").unwrap();
+        std::fs::write(dir.join("jobs/job-app.md"), "---\nid: job-app\ntitle: B\ncompany: \"[[acme]]\"\nurl: https://acme.com/b\nstatus: applied\n---\n").unwrap();
+        std::fs::write(dir.join("jobs/job-skip.md"), "---\nid: job-skip\ntitle: C\ncompany: \"[[acme]]\"\nurl: https://acme.com/c\nstatus: skipped\n---\n").unwrap();
+        std::fs::write(dir.join("jobs/job-new.md"), "---\nid: job-new\ntitle: D\ncompany: \"[[acme]]\"\nurl: https://acme.com/d\nstatus: new\n---\n").unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        let slugs = vec![
+            "job-sel".to_string(), "job-app".to_string(),
+            "job-skip".to_string(), "job-new".to_string(),
+        ];
+        let outcome = start_job_detail_runs(&q, vault, &slugs, "2026-06-22");
+
+        assert_eq!(outcome.started.len(), 1, "only the undecided job (new) must start");
+        assert_eq!(outcome.started[0].slug, "job-new");
+        assert_eq!(outcome.skipped.len(), 3, "all three decided jobs must land in skipped");
+        // Every skipped item must carry the decision reason.
+        for sk in &outcome.skipped {
+            assert!(
+                sk.reason.contains("decision") || sk.reason.contains("already"),
+                "skipped reason must mention decision; got: {:?}", sk.reason
+            );
+        }
+        // No queue tasks for decided jobs.
+        assert!(q.claim_next().unwrap().is_some(), "the started job enqueued a task");
+        assert!(q.claim_next().unwrap().is_none(), "no extra tasks for the decided jobs");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A candidate job with no `status:` line must land in `failed`, not `started` — absent status
+    /// is a data anomaly that the gate must surface before starting a fetch.
+    #[test]
+    fn start_job_detail_runs_fails_job_with_absent_status() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-nostatus-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        // Note has no `status:` field at all.
+        std::fs::write(
+            dir.join("jobs/job-nostatus.md"),
+            "---\nid: job-nostatus\ntitle: A\ncompany: \"[[acme]]\"\nurl: https://acme.com/a\n---\n",
+        ).unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        let outcome = start_job_detail_runs(&q, vault, &["job-nostatus".to_string()], "2026-06-22");
+
+        assert!(outcome.started.is_empty(), "a job with no status must not start");
+        assert_eq!(outcome.failed.len(), 1, "absent status is an anomaly: must be in failed");
+        assert_eq!(outcome.failed[0].slug, "job-nostatus");
+        assert!(
+            outcome.failed[0].error.contains("status") || outcome.failed[0].error.contains("missing") || outcome.failed[0].error.contains("anomaly"),
+            "error must describe the status anomaly; got: {:?}", outcome.failed[0].error
+        );
+        assert!(q.claim_next().unwrap().is_none(), "a status-anomaly job must not enqueue a task");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A candidate job with an unrecognized `status:` value must land in `failed` — unknown status
+    /// is a data anomaly, not a machine state the pipeline knows how to handle.
+    #[test]
+    fn start_job_detail_runs_fails_job_with_unknown_status() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-badstatus-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        // Note has an unrecognized status value.
+        std::fs::write(
+            dir.join("jobs/job-badstatus.md"),
+            "---\nid: job-badstatus\ntitle: A\ncompany: \"[[acme]]\"\nurl: https://acme.com/a\nstatus: garbage\n---\n",
+        ).unwrap();
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        let outcome = start_job_detail_runs(&q, vault, &["job-badstatus".to_string()], "2026-06-22");
+
+        assert!(outcome.started.is_empty(), "a job with an unknown status must not start");
+        assert_eq!(outcome.failed.len(), 1, "unknown status is an anomaly: must be in failed");
+        assert_eq!(outcome.failed[0].slug, "job-badstatus");
+        assert!(
+            outcome.failed[0].error.contains("garbage") || outcome.failed[0].error.contains("unknown") || outcome.failed[0].error.contains("anomaly"),
+            "error must name the unrecognized value; got: {:?}", outcome.failed[0].error
+        );
+        assert!(q.claim_next().unwrap().is_none(), "a status-anomaly job must not enqueue a task");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

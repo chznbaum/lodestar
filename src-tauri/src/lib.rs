@@ -48,6 +48,7 @@ pub fn run() {
             company::set_company_status,
             domain::list_domains,
             job::list_jobs,
+            job::get_job,
             job::update_job_field,
             job::set_job_status,
             check::list_checks,

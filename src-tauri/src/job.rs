@@ -7,7 +7,28 @@ use std::path::Path;
 
 // These are public API for later tasks (check.rs, pipeline commands) — suppress premature dead_code.
 #[allow(dead_code)]
-pub const JOB_STATUSES: &[&str] = &["new", "reviewed", "pursuing", "skipped"];
+pub const JOB_STATUSES: &[&str] = &["new", "detailed", "scored", "selected", "applied", "skipped"];
+
+/// Statuses only the app/pipeline may write (via `advance_job_status`).
+#[allow(dead_code)]
+pub const APP_SETTABLE_STATUSES: &[&str] = &["detailed", "scored"];
+
+/// Statuses only the human may write (via `set_job_status`).
+#[allow(dead_code)]
+pub const HUMAN_SETTABLE_STATUSES: &[&str] = &["selected", "applied", "skipped"];
+
+/// Statuses that represent a final human decision — the app must never override these.
+const DECIDED_STATUSES: &[&str] = &["selected", "applied", "skipped"];
+
+/// Monotonic rank for app-driven statuses; higher = further along the pipeline.
+fn status_rank(status: &str) -> Option<u8> {
+    match status {
+        "new"      => Some(0),
+        "detailed" => Some(1),
+        "scored"   => Some(2),
+        _          => None,
+    }
+}
 
 // Suppress dead_code until the write helpers (later in this file) start using them.
 #[allow(dead_code)]
@@ -75,9 +96,14 @@ pub struct Job {
     pub last_seen: Option<String>,
     pub ats: Option<String>,
     pub fit_score: Option<i64>,
+    pub fit_seniority: Option<i64>,
+    pub fit_skills: Option<i64>,
+    pub fit_comp: Option<i64>,
+    pub fit_arrangement: Option<i64>,
+    pub fit_domain: Option<i64>,
     /// Fields filled by the `research-gaps` stage — recorded for provenance.
     pub researched: Vec<String>,
-    /// new | reviewed | pursuing | skipped
+    /// new | detailed | scored | selected | applied | skipped
     pub status: Option<String>,
     pub skip_reason: Option<String>,
     pub jd_raw_file: Option<String>,
@@ -127,6 +153,11 @@ struct Front {
     last_seen: Option<String>,
     ats: Option<String>,
     fit_score: Option<i64>,
+    fit_seniority: Option<i64>,
+    fit_skills: Option<i64>,
+    fit_comp: Option<i64>,
+    fit_arrangement: Option<i64>,
+    fit_domain: Option<i64>,
     #[serde(default)]
     researched: Vec<String>,
     status: Option<String>,
@@ -179,6 +210,11 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
         last_seen: f.last_seen,
         ats: f.ats,
         fit_score: f.fit_score,
+        fit_seniority: f.fit_seniority,
+        fit_skills: f.fit_skills,
+        fit_comp: f.fit_comp,
+        fit_arrangement: f.fit_arrangement,
+        fit_domain: f.fit_domain,
         researched: f.researched,
         status: f.status,
         skip_reason: f.skip_reason,
@@ -188,7 +224,10 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
 }
 
 /// Integer-typed frontmatter fields — validated on write, coerced/degraded on read.
-pub const INT_FIELDS: &[&str] = &["comp_low", "comp_high", "yoe_min", "yoe_max", "fit_score"];
+pub const INT_FIELDS: &[&str] = &[
+    "comp_low", "comp_high", "yoe_min", "yoe_max",
+    "fit_score", "fit_seniority", "fit_skills", "fit_comp", "fit_arrangement", "fit_domain",
+];
 /// List-typed frontmatter fields — set via `set_job_list_field`, never the scalar writer.
 pub const LIST_FIELDS: &[&str] = &["tech_stack", "required_skills", "preferred_skills", "researched", "countries", "metros"];
 
@@ -211,6 +250,29 @@ fn parse_front_lenient(slug: &str, fm: &str) -> Result<Front, String> {
         eprintln!("{slug}: {w}");
     }
     Ok(f)
+}
+
+/// The full job record plus its markdown body sections, returned by `get_job`.
+#[derive(serde::Serialize)]
+pub struct JobDetail {
+    #[serde(flatten)]
+    pub job: Job,
+    pub body: String,
+}
+
+/// Read a single job note by slug, returning its typed fields plus the raw body
+/// (the text after the frontmatter, containing `## Alignment analysis` etc.).
+/// Returns an error if the file does not exist.
+#[tauri::command]
+pub fn get_job(vault_path: String, slug: String) -> Result<JobDetail, String> {
+    let path = Path::new(&vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read {path:?}: {e}"))?;
+    let job = parse_job(&slug, &text)?;
+    let body = split_frontmatter(&text).1.to_string();
+    Ok(JobDetail { job, body })
 }
 
 #[tauri::command]
@@ -299,6 +361,16 @@ pub fn render_job_note(job: &Job) -> String {
         ats: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         fit_score: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fit_seniority: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fit_skills: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fit_comp: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fit_arrangement: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fit_domain: Option<i64>,
         /// Populated fields from the research-gaps stage; omit when empty.
         #[serde(skip_serializing_if = "slice_is_empty")]
         researched: &'a [String],
@@ -341,6 +413,11 @@ pub fn render_job_note(job: &Job) -> String {
         last_seen: job.last_seen.as_deref(),
         ats: job.ats.as_deref(),
         fit_score: job.fit_score,
+        fit_seniority: job.fit_seniority,
+        fit_skills: job.fit_skills,
+        fit_comp: job.fit_comp,
+        fit_arrangement: job.fit_arrangement,
+        fit_domain: job.fit_domain,
         researched: &job.researched,
         status: job.status.as_deref(),
         skip_reason: job.skip_reason.as_deref(),
@@ -411,6 +488,9 @@ pub fn update_job_field(
     field: String,
     value: String,
 ) -> Result<(), String> {
+    if field == "status" {
+        return Err("status is managed by the state machine; use set_job_status or advance_job_status".into());
+    }
     if LIST_FIELDS.contains(&field.as_str()) {
         return Err(format!("{field} is a list field; use set_job_list_field"));
     }
@@ -463,7 +543,22 @@ pub fn set_job_list_field(
     note::write_note(&path, &updated)
 }
 
-/// Set the job's status (validated) and optionally record a skip_reason.
+/// Low-level status writer: encodes and persists `status` directly into the job note's
+/// frontmatter without any transition validation. Called by `set_job_status` and
+/// `advance_job_status` after they have validated the transition.
+fn set_status_field(vault_path: &str, slug: &str, status: &str) -> Result<(), String> {
+    let fragment = note::yaml_scalar(status)?;
+    let path = Path::new(vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let updated = note::set_frontmatter_field(&text, "status", &fragment)?;
+    note::write_note(&path, &updated)
+}
+
+/// Set the job's status via a **human**-driven transition. Only `selected`, `applied`, and
+/// `skipped` may be set this way; `new`/`detailed`/`scored` are pipeline-only. Transition
+/// rules are enforced (see `HUMAN_SETTABLE_STATUSES` and the predecessor table).
 #[allow(dead_code)]
 #[tauri::command]
 pub fn set_job_status(
@@ -472,12 +567,108 @@ pub fn set_job_status(
     status: String,
     skip_reason: Option<String>,
 ) -> Result<(), String> {
-    validate_job_status(&status)?;
-    update_job_field(vault_path.clone(), slug.clone(), "status".into(), status)?;
+    // Only human-settable targets are allowed.
+    if !HUMAN_SETTABLE_STATUSES.contains(&status.as_str()) {
+        return Err(format!(
+            "{status:?} is not human-settable; only {:?} may be set via set_job_status",
+            HUMAN_SETTABLE_STATUSES
+        ));
+    }
+
+    // Read the current status to validate the transition.
+    let path = Path::new(&vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let job = parse_job(&slug, &text)?;
+
+    // Absent or unrecognized current status is a data anomaly — hard-fail rather than coerce.
+    let current: &str = match job.status.as_deref() {
+        None => {
+            return Err(format!(
+                "job {slug:?} has no status; cannot change status (data anomaly — refusing)"
+            ));
+        }
+        Some(s) if !JOB_STATUSES.contains(&s) => {
+            return Err(format!(
+                "job {slug:?} has unknown status {s:?}; cannot change status"
+            ));
+        }
+        Some(s) => s,
+    };
+
+    // Enforce predecessor rules.
+    let allowed: bool = match status.as_str() {
+        "skipped"  => matches!(current, "new" | "detailed" | "scored"),
+        "selected" => current == "scored",
+        "applied"  => current == "selected",
+        _          => false, // can't happen — guarded above
+    };
+    if !allowed {
+        return Err(format!(
+            "illegal transition: {current:?} → {status:?} is not a valid human transition"
+        ));
+    }
+
+    set_status_field(&vault_path, &slug, &status)?;
     if let Some(r) = skip_reason {
-        update_job_field(vault_path, slug, "skip_reason".into(), r)?;
+        // skip_reason is free text — write via the scalar helper directly.
+        let fragment = note::yaml_scalar(&r)?;
+        let text2 = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+        let updated = note::set_frontmatter_field(&text2, "skip_reason", &fragment)?;
+        note::write_note(&path, &updated)?;
     }
     Ok(())
+}
+
+/// Advance the job's status via an **app**-driven monotonic transition.
+/// Targets must be one of `{detailed, scored}`. The invariants:
+/// - If the current status is absent or unrecognized, this is a hard error (data anomaly).
+/// - If the current status is a decided state (`selected`/`applied`/`skipped`), this is a no-op.
+/// - If `rank(current) >= rank(target)`, this is a no-op (never downgrade).
+/// - Otherwise, write `target`.
+#[allow(dead_code)]
+pub fn advance_job_status(vault_path: &str, slug: &str, target: &str) -> Result<(), String> {
+    if !APP_SETTABLE_STATUSES.contains(&target) {
+        return Err(format!(
+            "{target:?} is not an app-advanceable status; expected one of {:?}",
+            APP_SETTABLE_STATUSES
+        ));
+    }
+    let path = Path::new(vault_path)
+        .join("jobs")
+        .join(format!("{slug}.md"));
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
+    let job = parse_job(slug, &text)?;
+
+    // Absent or unrecognized status is a data anomaly — hard-fail rather than silently coerce.
+    let current = match job.status.as_deref() {
+        None => {
+            return Err(format!(
+                "job {slug:?} has no status; refusing to advance (data anomaly)"
+            ));
+        }
+        Some(s) if !JOB_STATUSES.contains(&s) => {
+            return Err(format!(
+                "job {slug:?} has unknown status {s:?}; refusing to advance"
+            ));
+        }
+        Some(s) => s,
+    };
+
+    // Never override a human decision.
+    if DECIDED_STATUSES.contains(&current) {
+        return Ok(());
+    }
+
+    // Monotonic: only advance, never downgrade.
+    let current_rank = status_rank(current).expect("current is a valid machine status");
+    let target_rank = status_rank(target).expect("target is in APP_SETTABLE_STATUSES");
+    if current_rank >= target_rank {
+        return Ok(()); // already at or past target
+    }
+
+    set_status_field(vault_path, slug, target)
 }
 
 /// Insert-or-replace a single `## heading` section in the job note's body, leaving frontmatter
@@ -546,7 +737,7 @@ mod tests {
 
     const STUB: &str = "---\nid: senior-engineer-stripe\ntitle: \"Senior Engineer\"\ncompany: \"[[stripe]]\"\nurl: https://stripe.com/jobs/123\nlevel: senior\nlocation: Remote (US)\nats: greenhouse\nstatus: new\nlast_seen: 2026-06-17\n---\n\n";
 
-    const DETAIL: &str = "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\nlevel: senior\ncomp_low: 180000\ncomp_high: 220000\ncomp_currency: USD\ncomp_period: annual\ncomp_equity: \"0.1-0.4%\"\nemployment_type: full_time\nyoe_min: 5\nyoe_max: 8\ntech_stack: [\"rust\"]\nrequired_skills: [\"rust\", \"distributed-systems\"]\npreferred_skills: [\"kubernetes\"]\nreports_to: CTO\nteam: Platform\nremote: remote\nlocation_constraints: \"US only\"\nvisa_sponsorship: not_offered\nrelocation: unspecified\napplication_url: https://acme.com/apply/1\nfit_score: 72\nresearched: [\"comp_low\", \"comp_high\"]\nstatus: reviewed\n---\n\n## JD — structured\n\nbody\n";
+    const DETAIL: &str = "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\nlevel: senior\ncomp_low: 180000\ncomp_high: 220000\ncomp_currency: USD\ncomp_period: annual\ncomp_equity: \"0.1-0.4%\"\nemployment_type: full_time\nyoe_min: 5\nyoe_max: 8\ntech_stack: [\"rust\"]\nrequired_skills: [\"rust\", \"distributed-systems\"]\npreferred_skills: [\"kubernetes\"]\nreports_to: CTO\nteam: Platform\nremote: remote\nlocation_constraints: \"US only\"\nvisa_sponsorship: not_offered\nrelocation: unspecified\napplication_url: https://acme.com/apply/1\nfit_score: 72\nresearched: [\"comp_low\", \"comp_high\"]\nstatus: scored\n---\n\n## JD — structured\n\nbody\n";
 
     #[test]
     fn parses_and_renders_all_jd_detail_fields() {
@@ -565,7 +756,7 @@ mod tests {
         assert_eq!(again.fit_score, Some(72));
     }
 
-    const FETCHED: &str = "---\nid: head-of-eng-acme\ntitle: \"Head of Engineering\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/9\nlevel: dept-head\ncomp_low: 200000\ncomp_high: 260000\ncomp_currency: USD\ntech_stack: [\"rust\", \"typescript\"]\nfit_score: 8\nstatus: reviewed\njd_raw_file: _jd/head-of-eng-acme.md\n---\n\n## JD — structured\n\nstuff\n";
+    const FETCHED: &str = "---\nid: head-of-eng-acme\ntitle: \"Head of Engineering\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/9\nlevel: dept-head\ncomp_low: 200000\ncomp_high: 260000\ncomp_currency: USD\ntech_stack: [\"rust\", \"typescript\"]\nfit_score: 8\nstatus: scored\njd_raw_file: _jd/head-of-eng-acme.md\n---\n\n## JD — structured\n\nstuff\n";
 
     #[test]
     fn parses_stub_and_jd_not_fetched() {
@@ -627,7 +818,7 @@ mod tests {
         assert_eq!(again.company.as_deref(), Some("acme")); // re-wrapped + re-stripped
         assert_eq!(again.comp_low, Some(200000));
         assert_eq!(again.tech_stack, vec!["rust".to_string(), "typescript".to_string()]);
-        assert_eq!(again.status.as_deref(), Some("reviewed"));
+        assert_eq!(again.status.as_deref(), Some("scored"));
         assert_eq!(again.jd_raw_file.as_deref(), Some("_jd/head-of-eng-acme.md"));
         assert_eq!(again.level.as_deref(), Some("dept-head"));
     }
@@ -844,6 +1035,35 @@ mod tests {
     }
 
     #[test]
+    fn get_job_returns_fields_and_body() {
+        let dir = std::env::temp_dir().join(format!("lodestar-getjob-{}", std::process::id()));
+        let jobs = dir.join("jobs");
+        std::fs::create_dir_all(&jobs).unwrap();
+        let slug = "senior-engineer-acme";
+        let text = "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/1\nlevel: senior\nfit_score: 80\nfit_seniority: 70\nfit_skills: 65\nfit_comp: 50\nfit_arrangement: 100\nfit_domain: 40\n---\n\n## Alignment analysis\n\nStrong fit.\n\n## Fit flags\n\nNone.\n";
+        std::fs::write(jobs.join(format!("{slug}.md")), text).unwrap();
+
+        let jd = get_job(dir.to_str().unwrap().to_string(), slug.to_string()).unwrap();
+        assert_eq!(jd.job.title, "Senior Engineer");
+        assert_eq!(jd.job.fit_score, Some(80));
+        assert_eq!(jd.job.fit_seniority, Some(70));
+        assert_eq!(jd.job.fit_skills, Some(65));
+        assert_eq!(jd.job.fit_comp, Some(50));
+        assert_eq!(jd.job.fit_arrangement, Some(100));
+        assert_eq!(jd.job.fit_domain, Some(40));
+        assert!(
+            jd.body.contains("## Alignment analysis"),
+            "body must contain the Alignment analysis section; got:\n{}",
+            jd.body
+        );
+
+        // missing file must return an error
+        assert!(get_job(dir.to_str().unwrap().to_string(), "no-such-job".to_string()).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn parse_job_degrades_bad_typed_fields_instead_of_failing() {
         // comp_low is non-numeric and required_skills is a scalar (not a list): both degrade to
         // empty and the note still loads — it must not vanish over one malformed field.
@@ -854,5 +1074,248 @@ mod tests {
         assert!(j.required_skills.is_empty());
         assert_eq!(j.remote.as_deref(), Some("remote"));
         assert_eq!(j.title, "X");
+    }
+
+    // ── Status state machine ──────────────────────────────────────────────────
+
+    /// Helper: write a job note with a specific status into a temp vault.
+    fn vault_with_job_status(n: u32, status: &str) -> (std::path::PathBuf, String, String) {
+        let dir = std::env::temp_dir().join(format!("lodestar-status-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let slug = "test-job-acme";
+        let text = format!(
+            "---\nid: {slug}\ntitle: \"Test Job\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\nstatus: {status}\n---\n\n"
+        );
+        std::fs::write(dir.join("jobs").join(format!("{slug}.md")), &text).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        (dir, vault, slug.to_string())
+    }
+
+    static STATUS_SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+
+    fn next_n() -> u32 {
+        STATUS_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn read_status(dir: &std::path::Path, slug: &str) -> Option<String> {
+        let path = dir.join("jobs").join(format!("{slug}.md"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        parse_job(slug, &text).unwrap().status
+    }
+
+    // ── Human transitions (set_job_status) ───────────────────────────────────
+
+    #[test]
+    fn human_scored_to_selected_ok() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "scored");
+        set_job_status(vault, slug.clone(), "selected".into(), None).unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("selected"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_new_to_selected_rejected() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
+        let err = set_job_status(vault, slug, "selected".into(), None).unwrap_err();
+        assert!(err.contains("selected") || err.contains("scored") || err.contains("illegal") || err.contains("invalid"),
+            "error must describe the illegal transition; got: {err:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_selected_to_applied_ok() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "selected");
+        set_job_status(vault, slug.clone(), "applied".into(), None).unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("applied"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_new_to_skipped_ok() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
+        set_job_status(vault, slug.clone(), "skipped".into(), Some("too junior".into())).unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_detailed_to_skipped_ok() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "detailed");
+        set_job_status(vault, slug.clone(), "skipped".into(), None).unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_scored_to_skipped_ok() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "scored");
+        set_job_status(vault, slug.clone(), "skipped".into(), None).unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_selected_to_skipped_rejected() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "selected");
+        let err = set_job_status(vault, slug, "skipped".into(), None).unwrap_err();
+        assert!(err.contains("skipped") || err.contains("illegal") || err.contains("invalid"),
+            "error must describe the illegal transition; got: {err:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_setting_detailed_rejected() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
+        let err = set_job_status(vault, slug, "detailed".into(), None).unwrap_err();
+        assert!(err.contains("detailed") || err.contains("app") || err.contains("pipeline") || err.contains("not human") || err.contains("illegal"),
+            "error must describe why detailed is not human-settable; got: {err:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_setting_scored_rejected() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
+        let err = set_job_status(vault, slug, "scored".into(), None).unwrap_err();
+        assert!(err.contains("scored") || err.contains("app") || err.contains("pipeline") || err.contains("not human") || err.contains("illegal"),
+            "error must describe why scored is not human-settable; got: {err:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── App transitions (advance_job_status) ─────────────────────────────────
+
+    #[test]
+    fn app_new_to_detailed() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
+        advance_job_status(&vault, &slug, "detailed").unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("detailed"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn app_detailed_to_scored() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "detailed");
+        advance_job_status(&vault, &slug, "scored").unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("scored"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn app_advance_detailed_on_scored_job_is_noop() {
+        // advancing "detailed" on a job that's already "scored" must leave it "scored"
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "scored");
+        advance_job_status(&vault, &slug, "detailed").unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("scored"),
+            "advancing 'detailed' on a scored job must not downgrade it");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn app_advance_on_selected_is_noop() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "selected");
+        advance_job_status(&vault, &slug, "scored").unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("selected"),
+            "app advance must not override a human decision (selected)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn app_advance_on_applied_is_noop() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "applied");
+        advance_job_status(&vault, &slug, "scored").unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("applied"),
+            "app advance must not override a human decision (applied)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn app_advance_on_skipped_is_noop() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "skipped");
+        advance_job_status(&vault, &slug, "scored").unwrap();
+        assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"),
+            "app advance must not override a human decision (skipped)");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── Anomaly surfacing (advance_job_status with bad status) ───────────────
+
+    /// Helper: write a job note with NO status field (absent) into a temp vault.
+    fn vault_with_no_status(n: u32) -> (std::path::PathBuf, String, String) {
+        let dir = std::env::temp_dir().join(format!("lodestar-nostatus-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let slug = "test-job-nostatus";
+        let text = "---\nid: test-job-nostatus\ntitle: \"Test Job\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\n---\n\n";
+        std::fs::write(dir.join("jobs").join(format!("{slug}.md")), text).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        (dir, vault, slug.to_string())
+    }
+
+    /// Helper: write a job note with an unrecognized status into a temp vault.
+    fn vault_with_unknown_status(n: u32, bad: &str) -> (std::path::PathBuf, String, String) {
+        let dir = std::env::temp_dir().join(format!("lodestar-badstatus-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        let slug = "test-job-badstatus";
+        let text = format!(
+            "---\nid: test-job-badstatus\ntitle: \"Test Job\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/j/1\nstatus: {bad}\n---\n\n"
+        );
+        std::fs::write(dir.join("jobs").join(format!("{slug}.md")), &text).unwrap();
+        let vault = dir.to_str().unwrap().to_string();
+        (dir, vault, slug.to_string())
+    }
+
+    #[test]
+    fn advance_on_absent_status_returns_err() {
+        let (dir, vault, slug) = vault_with_no_status(next_n());
+        let err = advance_job_status(&vault, &slug, "detailed").unwrap_err();
+        assert!(
+            err.contains("no status") || err.contains("missing") || err.contains("anomaly"),
+            "advance on absent status must return an error describing the anomaly; got: {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn advance_on_unknown_status_returns_err() {
+        let (dir, vault, slug) = vault_with_unknown_status(next_n(), "garbage");
+        let err = advance_job_status(&vault, &slug, "detailed").unwrap_err();
+        assert!(
+            err.contains("garbage") || err.contains("unknown") || err.contains("anomaly"),
+            "advance on unknown status must name the bad value; got: {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── set_job_status anomaly surfacing ─────────────────────────────────────
+
+    #[test]
+    fn set_job_status_on_absent_status_returns_err() {
+        let (dir, vault, slug) = vault_with_no_status(next_n());
+        let err = set_job_status(vault, slug, "skipped".into(), None).unwrap_err();
+        assert!(
+            err.contains("no status") || err.contains("missing") || err.contains("anomaly"),
+            "set_job_status on absent status must return an anomaly error; got: {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn set_job_status_on_unknown_status_returns_err() {
+        let (dir, vault, slug) = vault_with_unknown_status(next_n(), "garbage");
+        let err = set_job_status(vault, slug, "skipped".into(), None).unwrap_err();
+        assert!(
+            err.contains("garbage") || err.contains("unknown") || err.contains("anomaly"),
+            "set_job_status on unknown status must name the bad value; got: {err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── update_job_field status guard ─────────────────────────────────────────
+
+    #[test]
+    fn update_job_field_rejects_status_field() {
+        let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
+        let err = update_job_field(vault, slug, "status".into(), "skipped".into()).unwrap_err();
+        assert!(err.contains("status") || err.contains("managed") || err.contains("set_job_status"),
+            "error must indicate status is managed; got: {err:?}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

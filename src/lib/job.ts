@@ -8,15 +8,44 @@ export interface Job {
   url: string | null;
   level: string | null;
   location: string | null;
+  // Comp fields
   comp_low: number | null;
   comp_high: number | null;
   comp_currency: string | null;
   comp_raw: string | null;
+  comp_period: string | null;
+  comp_equity: string | null;
+  // Role classification
+  employment_type: string | null;
+  yoe_min: number | null;
+  yoe_max: number | null;
+  tech_stack: string[];
+  required_skills: string[];
+  preferred_skills: string[];
+  // Org context
+  reports_to: string | null;
+  team: string | null;
+  // Location / logistics
+  remote: string | null;
+  location_constraints: string | null;
+  visa_sponsorship: string | null;
+  relocation: string | null;
+  countries: string[];
+  metros: string[];
+  application_url: string | null;
+  // Pipeline metadata
   date_posted: string | null;
   last_seen: string | null;
   ats: string | null;
-  tech_stack: string[];
   fit_score: number | null;
+  fit_seniority: number | null;
+  fit_skills: number | null;
+  fit_comp: number | null;
+  fit_arrangement: number | null;
+  fit_domain: number | null;
+  /** Fields populated by the research-gaps stage (provenance). */
+  researched: string[];
+  /** new | detailed | scored | selected | applied | skipped */
   status: string | null;
   skip_reason: string | null;
   jd_raw_file: string | null;
@@ -24,7 +53,38 @@ export interface Job {
   jd_fetched: boolean;
 }
 
+/** The full job record plus its markdown body sections (returned by `get_job`). */
+export interface JobDetail extends Job {
+  body: string;
+}
+
+/** Valid job status values — mirrors the Rust `JOB_STATUSES` constant verbatim (lifecycle order). */
+export const JOB_STATUSES = ["new", "detailed", "scored", "selected", "applied", "skipped"] as const;
+
+/** Statuses the human may set via `set_job_status` (the decision control). */
+export const HUMAN_SETTABLE_STATUSES = ["selected", "applied", "skipped"] as const;
+
 /** Read + parse every job note under `<vaultPath>/jobs`. */
 export function listJobs(vaultPath: string): Promise<Job[]> {
   return invoke<Job[]>("list_jobs", { vaultPath });
+}
+
+/** Read a single job note by slug, returning its typed fields plus the raw body. */
+export function getJob(vaultPath: string, slug: string): Promise<JobDetail> {
+  return invoke<JobDetail>("get_job", { vaultPath, slug });
+}
+
+/** Set the job's status (validated on the backend). */
+export function setJobStatus(vaultPath: string, slug: string, status: string): Promise<void> {
+  return invoke("set_job_status", { vaultPath, slug, status });
+}
+
+/** Write a single scalar field on the job note. */
+export function updateJobField(
+  vaultPath: string,
+  slug: string,
+  field: string,
+  value: string,
+): Promise<void> {
+  return invoke("update_job_field", { vaultPath, slug, field, value });
 }
