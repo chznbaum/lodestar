@@ -1843,7 +1843,7 @@ mod tests {
             if n == 1 {
                 Err("rate limited".into()) // fail the first attempt
             } else {
-                Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(20_000) }) // $0.02
+                Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(20_000), cache_read_tokens: None, cache_write_tokens: None }) // $0.02
             }
         }
     }
@@ -1878,7 +1878,7 @@ mod tests {
     }
     impl Llm for AlwaysOkLlm {
         fn complete(&self, _req: &LlmRequest) -> Result<LlmResponse, String> {
-            Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(10_000) })
+            Ok(LlmResponse { content: self.reply.clone(), cost_micro_usd: Some(10_000), cache_read_tokens: None, cache_write_tokens: None })
         }
     }
 
@@ -3004,6 +3004,8 @@ mod tests {
             Ok(LlmResponse {
                 content: "## Alignment analysis\n\nOK.".into(),
                 cost_micro_usd: Some(1),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
             })
         }
     }
@@ -3099,7 +3101,7 @@ mod tests {
                    "required_skills":["rust"],"preferred_skills":["kubernetes"],"remote":"remote",
                    "level":"senior","yoe_min":5,"role_brief":"Build platform.","must_haves":"5y Rust"}"#.to_string()
             };
-            Ok(LlmResponse { content, cost_micro_usd: Some(15_000) })
+            Ok(LlmResponse { content, cost_micro_usd: Some(15_000), cache_read_tokens: None, cache_write_tokens: None })
         }
     }
 
