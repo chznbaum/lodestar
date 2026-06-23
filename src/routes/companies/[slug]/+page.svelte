@@ -10,11 +10,11 @@
   import DomainPicker from "$lib/DomainPicker.svelte";
   import { listJobs, type Job } from "$lib/job";
   import { levelLabel } from "$lib/level";
-  import { fetchJobsForCompany, fetchJobDetails, cancelRun, onRunStep, onRunFinished, phaseLabel, JOB_DETAIL_STAGES, type JobDetailStage } from "$lib/pipeline";
+  import { fetchJobsForCompany, fetchJobDetails, cancelRun, onRunStep, onRunFinished, phaseLabel, DETAIL_STAGES, SCORING_STAGES, type DetailStage, type ScoringStage, type RunStepEvent } from "$lib/pipeline";
   import { fitBand } from "$lib/fit";
   import { sortRoles, outcomeBySlug } from "$lib/rolesView";
-  import { classifyStatus } from "$lib/jobStatus";
-  import { getCheck } from "$lib/check";
+  import { classifyStatus, STATUS_LABELS } from "$lib/jobStatus";
+  import { getCheck, listChecks } from "$lib/check";
   import { onRecordChanged } from "$lib/vaultSync";
 
   const slug = $derived(page.params.slug ?? "");
@@ -116,12 +116,28 @@
   /** Stage status values used in the step strip. */
   type StageStatus = "done" | "now" | "failed" | "skipped";
 
+  /**
+   * Which run phase is currently active for this slug.
+   * "queued"      — started in the outcome but no run:step has arrived yet.
+   * "detail"      — a run:step for a DETAIL_STAGES stage has arrived.
+   * "detail-done" — the detail run finished; scoring handoff has not started yet.
+   *                 The Detail strip is finalized (no pulsing); Scoring strip is empty.
+   *                 Transitions to "scoring" on the first SCORING_STAGES run:step.
+   * "scoring"     — a run:step for a SCORING_STAGES stage has arrived.
+   */
+  type ActivePhase = "queued" | "detail" | "detail-done" | "scoring";
+
   /** A job whose detail fetch is currently running. */
   type RunStateRunning = {
     status: "running";
     runId: string;
     phase: string;
-    stageStatus: Map<JobDetailStage, StageStatus>;
+    /** Which pipeline phase is currently active. */
+    activePhase: ActivePhase;
+    /** Per-stage status for the Detail strip (DETAIL_STAGES). */
+    detailStageStatus: Map<DetailStage, StageStatus>;
+    /** Per-stage status for the Scoring strip (SCORING_STAGES). */
+    scoringStageStatus: Map<ScoringStage, StageStatus>;
   };
   /** A job that was durably skipped (already running / already decided elsewhere). */
   type RunStateSkipped = { status: "skipped"; detail: string };
@@ -159,11 +175,14 @@
     const next = new Map(prev);
     for (const [s, entry] of outcomeBySlug(outcome)) {
       if (entry.kind === "started") {
+        // Seed as "queued" — the row will not animate until the first run:step arrives.
         next.set(s, {
           status: "running",
           runId: entry.runId,
-          phase: "Starting…",
-          stageStatus: new Map(),
+          phase: "Queued…",
+          activePhase: "queued",
+          detailStageStatus: new Map(),
+          scoringStageStatus: new Map(),
         });
       } else if (entry.kind === "skipped") {
         next.set(s, { status: "skipped", detail: entry.detail });
@@ -238,7 +257,7 @@
       for (const summary of summaries.filter((s) => s.status === "running")) {
         try {
           const full = await getCheck(vp, summary.slug);
-          if (!full.companies.includes(currentSlug)) continue;
+          if (full.kind !== "job_check" || full.subject !== currentSlug) continue;
           // Found the active run — restore live state.
           runId = summary.slug;
           running = true;
@@ -256,14 +275,80 @@
     })();
   });
 
+  // Cold-load best-effort: if any job_detail or job_scoring runs are already in progress when
+  // the page loads (e.g. the user navigated away and back), seed runBySlug so the strips resume.
+  // The live event path (onRunStep) is primary; this is secondary / best-effort.
+  $effect(() => {
+    if (!cs.vaultPath || jobs.length === 0) return;
+    const vp = cs.vaultPath;
+    const jobSlugs = new Set(jobs.map((j) => j.slug));
+    (async () => {
+      const summaries = await listChecks(vp).catch(() => []);
+      const running = summaries.filter(
+        (s) =>
+          s.status === "running" &&
+          (s.kind === "job_detail" || s.kind === "job_scoring") &&
+          jobSlugs.has(s.subject),
+      );
+      if (running.length === 0) return;
+      const next = new Map(runBySlug);
+      for (const summary of running) {
+        const jobSlug = summary.subject;
+        // Don't overwrite an entry that is already live (seeded by applyOutcome or a prior event).
+        if (next.has(jobSlug)) continue;
+        // Best-effort: read the full check to derive done stages.
+        let detailStageStatus = new Map<DetailStage, StageStatus>();
+        let scoringStageStatus = new Map<ScoringStage, StageStatus>();
+        let activePhase: ActivePhase = summary.kind === "job_scoring" ? "scoring" : "detail";
+        let phaseStr = summary.kind === "job_scoring" ? "Scoring…" : "Working…";
+        try {
+          const full = await getCheck(vp, summary.slug);
+          for (const step of full.steps) {
+            if (step.status === "ok") {
+              if ((DETAIL_STAGES as readonly string[]).includes(step.stage)) {
+                detailStageStatus.set(step.stage as DetailStage, "done");
+              } else if ((SCORING_STAGES as readonly string[]).includes(step.stage)) {
+                scoringStageStatus.set(step.stage as ScoringStage, "done");
+              }
+            }
+          }
+          // If this is a scoring run, mark all detail stages complete.
+          if (summary.kind === "job_scoring") {
+            for (const ds of DETAIL_STAGES) {
+              if (!detailStageStatus.has(ds)) detailStageStatus.set(ds, "done");
+            }
+          }
+          // Derive best phase label from the last running/ok step.
+          const lastStep = full.steps.at(-1);
+          if (lastStep) {
+            phaseStr = phaseLabel(lastStep.stage, "running") || phaseStr;
+          }
+        } catch {
+          // Can't read full check — just show it as active/working.
+        }
+        next.set(jobSlug, {
+          status: "running",
+          runId: summary.slug,
+          phase: phaseStr,
+          activePhase,
+          detailStageStatus,
+          scoringStageStatus,
+        });
+      }
+      runBySlug = next;
+    })();
+  });
+
   // Live progress: per-step + run-finished events for ALL runs on this page.
-  // The discovery run is identified by `runId` (single run); job_detail runs are
-  // identified by matching `e.run_id` against the running entries in `runBySlug`.
+  // The discovery run is identified by `runId` (single run).
+  // Job-detail/job-scoring runs for a slug are matched by `e.subject` (the slug) —
+  // both the detail run and the auto-handed-off scoring run share the same slug, so
+  // the strip fills 1→6 continuously across the handoff without a re-key.
   $effect(() => {
     const subs: (() => void)[] = [];
     let active = true;
     Promise.all([
-      onRunStep((e) => {
+      onRunStep((e: RunStepEvent) => {
         // ── Discovery run ──
         if (e.run_id === runId) {
           progress = `${e.stage}: ${e.status}`;
@@ -271,46 +356,74 @@
           if (label) phase = label;
           return;
         }
-        // ── Job-detail run: find the slug whose runId matches ──
-        let matchedSlug: string | undefined;
-        for (const [slug, rs] of runBySlug) {
-          if (rs.status === "running" && rs.runId === e.run_id) {
-            matchedSlug = slug;
-            break;
-          }
-        }
-        if (!matchedSlug) return;
+        // ── Job-detail/job-scoring run: match by subject (the job slug) ──
+        const matchedSlug = e.subject || undefined;
+        if (!matchedSlug || !runBySlug.has(matchedSlug)) return;
+        const existingRs = runBySlug.get(matchedSlug);
+        if (!existingRs || existingRs.status !== "running") return;
 
         const next = new Map(runBySlug);
-        const rs = next.get(matchedSlug) as RunStateRunning;
-        const newStageStatus = new Map(rs.stageStatus);
-        const stage = e.stage as JobDetailStage;
+        const rs = existingRs as RunStateRunning;
+        const stage = e.stage;
 
-        if (e.status === "running") {
-          // Mark this stage as now; mark all earlier canonical stages without status as skipped.
-          const stageIdx = JOB_DETAIL_STAGES.indexOf(stage);
-          for (let i = 0; i < stageIdx; i++) {
-            const earlier = JOB_DETAIL_STAGES[i];
-            if (!newStageStatus.has(earlier)) {
-              newStageStatus.set(earlier, "skipped");
+        // Determine which strip this stage belongs to.
+        const isDetailStage = (DETAIL_STAGES as readonly string[]).includes(stage);
+        const isScoringStage = (SCORING_STAGES as readonly string[]).includes(stage);
+
+        const newDetailStatus = new Map(rs.detailStageStatus);
+        const newScoringStatus = new Map(rs.scoringStageStatus);
+        let newActivePhase: ActivePhase = rs.activePhase;
+
+        if (isDetailStage) {
+          const ds = stage as DetailStage;
+          if (e.status === "running") {
+            newActivePhase = "detail";
+            // Mark earlier detail stages without status as skipped.
+            const stageIdx = DETAIL_STAGES.indexOf(ds);
+            for (let i = 0; i < stageIdx; i++) {
+              const earlier = DETAIL_STAGES[i];
+              if (!newDetailStatus.has(earlier)) newDetailStatus.set(earlier, "skipped");
             }
+            newDetailStatus.set(ds, "now");
+          } else if (e.status === "ok") {
+            newDetailStatus.set(ds, "done");
+          } else if (e.status === "failed") {
+            newDetailStatus.set(ds, "failed");
           }
-          newStageStatus.set(stage, "now");
-        } else if (e.status === "ok") {
-          newStageStatus.set(stage, "done");
-        } else if (e.status === "failed") {
-          newStageStatus.set(stage, "failed");
+        } else if (isScoringStage) {
+          const ss = stage as ScoringStage;
+          if (e.status === "running") {
+            // Transition from "detail-done" (or any prior phase) to active scoring.
+            // Detail strip was already finalized at detail-run:finished; no backfill needed here.
+            newActivePhase = "scoring";
+            // Mark earlier scoring stages without status as skipped.
+            const stageIdx = SCORING_STAGES.indexOf(ss);
+            for (let i = 0; i < stageIdx; i++) {
+              const earlier = SCORING_STAGES[i];
+              if (!newScoringStatus.has(earlier)) newScoringStatus.set(earlier, "skipped");
+            }
+            newScoringStatus.set(ss, "now");
+          } else if (e.status === "ok") {
+            newScoringStatus.set(ss, "done");
+          } else if (e.status === "failed") {
+            newScoringStatus.set(ss, "failed");
+          }
         }
+        // Unknown stage: ignore (don't crash).
 
         const label = phaseLabel(e.stage, e.status, e.detail);
         next.set(matchedSlug, {
           ...rs,
+          // Always track the latest run_id so "cancel" hits the active run.
+          runId: e.run_id,
           phase: label || rs.phase,
-          stageStatus: newStageStatus,
+          activePhase: newActivePhase,
+          detailStageStatus: newDetailStatus,
+          scoringStageStatus: newScoringStatus,
         });
         runBySlug = next;
       }),
-      onRunFinished(async (e) => {
+      onRunFinished(async (e: RunStepEvent) => {
         // ── Discovery run ──
         if (e.run_id === runId) {
           running = false;
@@ -339,27 +452,47 @@
           }
           return;
         }
-        // ── Job-detail run: find the slug whose runId matches ──
-        let matchedSlug: string | undefined;
-        for (const [slug, rs] of runBySlug) {
-          if (rs.status === "running" && rs.runId === e.run_id) {
-            matchedSlug = slug;
-            break;
-          }
-        }
-        if (!matchedSlug) return;
-
-        const next = new Map(runBySlug);
+        // ── Job-detail/job-scoring run: match by subject (the job slug) ──
+        const matchedSlug = e.subject || undefined;
+        if (!matchedSlug || !runBySlug.has(matchedSlug)) return;
+        const existingRs = runBySlug.get(matchedSlug);
+        if (!existingRs || existingRs.status !== "running") return;
 
         if (e.status === "complete") {
-          // Run succeeded — reload jobs so the row reflects the new fit_score, then remove the entry.
+          // A run completed — reload to get the current job state, then decide:
+          // - scored (fit_score != null)  → the scoring run finished; finalize (remove entry)
+          // - detailed (fit_score == null) → the detail run just finished; finalize the Detail
+          //   strip and enter "detail-done" (non-pulsing rest) while awaiting the scoring handoff.
           await loadJobs();
-          next.delete(matchedSlug);
+          const reloadedJob = jobs.find((j) => j.slug === matchedSlug);
+          const next = new Map(runBySlug);
+          if (!reloadedJob || reloadedJob.fit_score !== null) {
+            // Scoring run finished (or job is gone) → row shows fit band.
+            next.delete(matchedSlug);
+          } else {
+            // Detail run finished; scoring handoff is expected but hasn't started yet.
+            // Finalize the Detail strip (mark any still-unset stage as "done", including a
+            // skipped research-gaps → "done" which is correct and intended) and rest non-pulsing.
+            const rs = existingRs as RunStateRunning;
+            const finalDetailStatus = new Map(rs.detailStageStatus);
+            for (const ds of DETAIL_STAGES) {
+              if (!finalDetailStatus.has(ds)) finalDetailStatus.set(ds, "done");
+            }
+            next.set(matchedSlug, {
+              ...rs,
+              phase: "Detail done · awaiting scoring…",
+              activePhase: "detail-done",
+              detailStageStatus: finalDetailStatus,
+            });
+          }
+          runBySlug = next;
         } else if (e.status === "failed") {
           // Run failed — build a durable failed entry with the last failed stage info.
-          // `run:finished` carries no `detail`, so read the real reason from the check note.
-          const rs = next.get(matchedSlug) as RunStateRunning;
-          const lastFailedStage = [...rs.stageStatus.entries()].find(([, v]) => v === "failed")?.[0] ?? null;
+          const rs = existingRs as RunStateRunning;
+          // Check both strips for a failed stage.
+          const lastFailedDetail = [...rs.detailStageStatus.entries()].find(([, v]) => v === "failed")?.[0] ?? null;
+          const lastFailedScoring = [...rs.scoringStageStatus.entries()].find(([, v]) => v === "failed")?.[0] ?? null;
+          const lastFailedStage = lastFailedDetail ?? lastFailedScoring;
           let detail = "Run failed";
           try {
             const check = cs.vaultPath ? await getCheck(cs.vaultPath, e.run_id) : null;
@@ -368,17 +501,20 @@
           } catch {
             // best-effort — keep generic fallback
           }
+          const next = new Map(runBySlug);
           next.set(matchedSlug, {
             status: "failed",
             failedStage: lastFailedStage,
             detail,
           });
           await loadJobs();
+          runBySlug = next;
         } else if (e.status === "cancelled") {
+          const next = new Map(runBySlug);
           next.delete(matchedSlug);
+          runBySlug = next;
           await loadJobs();
         }
-        runBySlug = next;
       }),
     ]).then((u) => {
       if (active) subs.push(...u);
@@ -618,7 +754,7 @@
                 <div class="roles__fit">
                   {#if rs?.status === "running"}
                     <span class="roles__fitnum unscored">···</span>
-                    <span class="roles__bandlbl">scoring</span>
+                    <span class="roles__bandlbl">{rs.activePhase === "queued" ? "queued" : rs.activePhase === "scoring" ? "scoring" : rs.activePhase === "detail-done" ? "detailed" : "fetching"}</span>
                   {:else if j.fit_score !== null}
                     <span class="roles__fitnum {band.key}">{j.fit_score}</span>
                     <span class="roles__bandlbl">{band.label.toLowerCase()}</span>
@@ -634,15 +770,28 @@
                     <span class="roles__title">{j.title}</span>
 
                     {#if rs?.status === "running"}
-                      <!-- live progress indicator -->
+                      <!-- live progress indicator: two separate strips (Detail | Scoring) -->
                       <span class="roles__live">
-                        <span class="roles__livedot"></span>
+                        <!-- dot: idle (dim, no animation) when queued or detail-done (awaiting handoff);
+                             pulsing when actively fetching or scoring -->
+                        <span class="roles__livedot" class:roles__livedot--idle={rs.activePhase === "queued" || rs.activePhase === "detail-done"}></span>
                         {rs.phase}
-                        <span class="roles__steps" title={JOB_DETAIL_STAGES.join(" · ")}>
-                          {#each JOB_DETAIL_STAGES as stage}
-                            <i class={rs.stageStatus.get(stage) ?? ""}></i>
-                          {/each}
-                        </span>
+                        {#if rs.activePhase !== "queued"}
+                          <!-- Detail strip (jd-scrape, structure-jd, gap-detect, research-gaps) -->
+                          <span class="roles__phaselabel">Detail</span>
+                          <span class="roles__steps" title={DETAIL_STAGES.join(" · ")}>
+                            {#each DETAIL_STAGES as stage}
+                              <i class={rs.detailStageStatus.get(stage) ?? ""}></i>
+                            {/each}
+                          </span>
+                          <!-- Scoring strip (fit-score, alignment) -->
+                          <span class="roles__phaselabel">Scoring</span>
+                          <span class="roles__steps" title={SCORING_STAGES.join(" · ")}>
+                            {#each SCORING_STAGES as stage}
+                              <i class={rs.scoringStageStatus.get(stage) ?? ""}></i>
+                            {/each}
+                          </span>
+                        {/if}
                       </span>
                     {:else if rs?.status === "skipped"}
                       <span class="chip flat">{rs.detail}</span>
@@ -651,9 +800,9 @@
                     {:else if statusDisplay.kind === "anomaly"}
                       <span class="chip {statusDisplay.raw === null ? 'warn' : 'danger'}">{statusDisplay.message}</span>
                     {:else if j.fit_score !== null}
-                      {#if j.fit_score === 0}
-                        <span class="chip danger">dealbreaker</span>
-                      {/if}
+                      <!-- fit score is shown in the fit column; no dealbreaker chip here (no flags body available) -->
+                    {:else if statusDisplay.kind === "known" && j.status === "detailed"}
+                      <span class="chip flat">{STATUS_LABELS["detailed"]}</span>
                     {:else}
                       <span class="chip flat">new</span>
                     {/if}

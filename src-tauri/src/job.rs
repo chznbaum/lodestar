@@ -105,7 +105,6 @@ pub struct Job {
     pub researched: Vec<String>,
     /// new | detailed | scored | selected | applied | skipped
     pub status: Option<String>,
-    pub skip_reason: Option<String>,
     pub jd_raw_file: Option<String>,
     /// Derived: a structured JD has been fetched for this role (powers the §4.2 gate).
     pub jd_fetched: bool,
@@ -161,7 +160,6 @@ struct Front {
     #[serde(default)]
     researched: Vec<String>,
     status: Option<String>,
-    skip_reason: Option<String>,
     jd_raw_file: Option<String>,
 }
 
@@ -217,7 +215,6 @@ pub fn parse_job(slug: &str, text: &str) -> Result<Job, String> {
         fit_domain: f.fit_domain,
         researched: f.researched,
         status: f.status,
-        skip_reason: f.skip_reason,
         jd_raw_file: f.jd_raw_file,
         jd_fetched,
     })
@@ -377,8 +374,6 @@ pub fn render_job_note(job: &Job) -> String {
         #[serde(skip_serializing_if = "Option::is_none")]
         status: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        skip_reason: Option<&'a str>,
-        #[serde(skip_serializing_if = "Option::is_none")]
         jd_raw_file: Option<&'a str>,
     }
     let fm = Fm {
@@ -420,7 +415,6 @@ pub fn render_job_note(job: &Job) -> String {
         fit_domain: job.fit_domain,
         researched: &job.researched,
         status: job.status.as_deref(),
-        skip_reason: job.skip_reason.as_deref(),
         jd_raw_file: job.jd_raw_file.as_deref(),
     };
     let yaml = serde_yaml::to_string(&fm).expect("job frontmatter serializes");
@@ -565,7 +559,6 @@ pub fn set_job_status(
     vault_path: String,
     slug: String,
     status: String,
-    skip_reason: Option<String>,
 ) -> Result<(), String> {
     // Only human-settable targets are allowed.
     if !HUMAN_SETTABLE_STATUSES.contains(&status.as_str()) {
@@ -611,13 +604,6 @@ pub fn set_job_status(
     }
 
     set_status_field(&vault_path, &slug, &status)?;
-    if let Some(r) = skip_reason {
-        // skip_reason is free text — write via the scalar helper directly.
-        let fragment = note::yaml_scalar(&r)?;
-        let text2 = std::fs::read_to_string(&path).map_err(|e| format!("read {path:?}: {e}"))?;
-        let updated = note::set_frontmatter_field(&text2, "skip_reason", &fragment)?;
-        note::write_note(&path, &updated)?;
-    }
     Ok(())
 }
 
@@ -878,12 +864,11 @@ mod tests {
         // bad enum value rejected, file unchanged
         assert!(update_job_field(vault.clone(), "senior-engineer-acme".into(), "employment_type".into(), "wizard".into()).is_err());
 
-        // status + skip_reason
-        set_job_status(vault.clone(), "senior-engineer-acme".into(), "skipped".into(), Some("comp below floor".into())).unwrap();
+        // status transition: scored → skipped
+        set_job_status(vault.clone(), "senior-engineer-acme".into(), "skipped".into()).unwrap();
         let j2 = parse_job("senior-engineer-acme",
             &std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap()).unwrap();
         assert_eq!(j2.status.as_deref(), Some("skipped"));
-        assert_eq!(j2.skip_reason.as_deref(), Some("comp below floor"));
 
         // body section upsert preserves frontmatter + adds the heading
         set_job_section(&vault, "senior-engineer-acme", "## Alignment analysis", "Strong fit.").unwrap();
@@ -1108,7 +1093,7 @@ mod tests {
     #[test]
     fn human_scored_to_selected_ok() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "scored");
-        set_job_status(vault, slug.clone(), "selected".into(), None).unwrap();
+        set_job_status(vault, slug.clone(), "selected".into()).unwrap();
         assert_eq!(read_status(&dir, &slug).as_deref(), Some("selected"));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1116,7 +1101,7 @@ mod tests {
     #[test]
     fn human_new_to_selected_rejected() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
-        let err = set_job_status(vault, slug, "selected".into(), None).unwrap_err();
+        let err = set_job_status(vault, slug, "selected".into()).unwrap_err();
         assert!(err.contains("selected") || err.contains("scored") || err.contains("illegal") || err.contains("invalid"),
             "error must describe the illegal transition; got: {err:?}");
         std::fs::remove_dir_all(&dir).ok();
@@ -1125,7 +1110,7 @@ mod tests {
     #[test]
     fn human_selected_to_applied_ok() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "selected");
-        set_job_status(vault, slug.clone(), "applied".into(), None).unwrap();
+        set_job_status(vault, slug.clone(), "applied".into()).unwrap();
         assert_eq!(read_status(&dir, &slug).as_deref(), Some("applied"));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1133,7 +1118,7 @@ mod tests {
     #[test]
     fn human_new_to_skipped_ok() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
-        set_job_status(vault, slug.clone(), "skipped".into(), Some("too junior".into())).unwrap();
+        set_job_status(vault, slug.clone(), "skipped".into()).unwrap();
         assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1141,7 +1126,7 @@ mod tests {
     #[test]
     fn human_detailed_to_skipped_ok() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "detailed");
-        set_job_status(vault, slug.clone(), "skipped".into(), None).unwrap();
+        set_job_status(vault, slug.clone(), "skipped".into()).unwrap();
         assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1149,7 +1134,7 @@ mod tests {
     #[test]
     fn human_scored_to_skipped_ok() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "scored");
-        set_job_status(vault, slug.clone(), "skipped".into(), None).unwrap();
+        set_job_status(vault, slug.clone(), "skipped".into()).unwrap();
         assert_eq!(read_status(&dir, &slug).as_deref(), Some("skipped"));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1157,7 +1142,7 @@ mod tests {
     #[test]
     fn human_selected_to_skipped_rejected() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "selected");
-        let err = set_job_status(vault, slug, "skipped".into(), None).unwrap_err();
+        let err = set_job_status(vault, slug, "skipped".into()).unwrap_err();
         assert!(err.contains("skipped") || err.contains("illegal") || err.contains("invalid"),
             "error must describe the illegal transition; got: {err:?}");
         std::fs::remove_dir_all(&dir).ok();
@@ -1166,7 +1151,7 @@ mod tests {
     #[test]
     fn human_setting_detailed_rejected() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
-        let err = set_job_status(vault, slug, "detailed".into(), None).unwrap_err();
+        let err = set_job_status(vault, slug, "detailed".into()).unwrap_err();
         assert!(err.contains("detailed") || err.contains("app") || err.contains("pipeline") || err.contains("not human") || err.contains("illegal"),
             "error must describe why detailed is not human-settable; got: {err:?}");
         std::fs::remove_dir_all(&dir).ok();
@@ -1175,7 +1160,7 @@ mod tests {
     #[test]
     fn human_setting_scored_rejected() {
         let (dir, vault, slug) = vault_with_job_status(next_n(), "new");
-        let err = set_job_status(vault, slug, "scored".into(), None).unwrap_err();
+        let err = set_job_status(vault, slug, "scored".into()).unwrap_err();
         assert!(err.contains("scored") || err.contains("app") || err.contains("pipeline") || err.contains("not human") || err.contains("illegal"),
             "error must describe why scored is not human-settable; got: {err:?}");
         std::fs::remove_dir_all(&dir).ok();
@@ -1289,7 +1274,7 @@ mod tests {
     #[test]
     fn set_job_status_on_absent_status_returns_err() {
         let (dir, vault, slug) = vault_with_no_status(next_n());
-        let err = set_job_status(vault, slug, "skipped".into(), None).unwrap_err();
+        let err = set_job_status(vault, slug, "skipped".into()).unwrap_err();
         assert!(
             err.contains("no status") || err.contains("missing") || err.contains("anomaly"),
             "set_job_status on absent status must return an anomaly error; got: {err:?}"
@@ -1300,7 +1285,7 @@ mod tests {
     #[test]
     fn set_job_status_on_unknown_status_returns_err() {
         let (dir, vault, slug) = vault_with_unknown_status(next_n(), "garbage");
-        let err = set_job_status(vault, slug, "skipped".into(), None).unwrap_err();
+        let err = set_job_status(vault, slug, "skipped".into()).unwrap_err();
         assert!(
             err.contains("garbage") || err.contains("unknown") || err.contains("anomaly"),
             "set_job_status on unknown status must name the bad value; got: {err:?}"

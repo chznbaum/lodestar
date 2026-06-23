@@ -4,7 +4,8 @@
  *       .jobs__breakdown, .jobs__subscore-list, .jobs__subrow, .jobs__sublabel,
  *       .jobs__bar-track, .jobs__bar-fill, .jobs__subval, .jobs__fitflags,
  *       .jobs__fitflags-head, .jobs__hero, .jobs__section, .jobs__jd-brief,
- *       .jobs__rawpath, .jobs__field-val, .jobs__researched.
+ *       .jobs__rawpath, .jobs__researched,
+ *       .jobs__rescore-indicator, .jobs__rescore-note.
  * Band color modifiers: .band--good, .band--warn, .band--danger, .band--unscored.
  * Tokens only — no hardcoded colors. Squared corners throughout (--r-* = 0).
  * Atoms reused at-name: .chip, .btn, .linkbtn, .panel, .panel__head,
@@ -210,26 +211,24 @@
   margin: 0 0 var(--sp-2);
 }
 
-/* ── inline field edit ── */
-.jobs__field-val {
-  /* linkbtn already handles base; override to allow wrapping text */
-  white-space: normal;
-  text-align: left;
-  font-family: var(--font-body);
-  font-size: var(--fs-md);
-  color: var(--ink);
-}
-
-.jobs__field-val:hover {
-  color: var(--primary);
-  text-decoration: underline;
-}
-
 /* Researched provenance marker */
 .jobs__researched {
   font-size: var(--fs-xs);
   color: var(--accent-ink);
   margin-left: var(--sp-2);
+}
+
+/* ── re-score indicator / note ── */
+.jobs__rescore-indicator {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  margin: 0 0 var(--sp-2);
+}
+
+.jobs__rescore-note {
+  font-size: var(--fs-xs);
+  color: var(--faint);
+  margin: 0 0 var(--sp-2);
 }
 
 /* ── hint / error states ── */

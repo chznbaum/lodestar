@@ -72,13 +72,6 @@
   color: var(--danger);
 }
 
-/* Live current-phase phrase — shown in the Status cell while a run is running */
-.checks__phase {
-  font-size: var(--fs-sm);
-  color: var(--ink-soft);
-  font-style: italic;
-}
-
 /* ── Step inspector (/checks/[id]) ────────────────────── */
 .check-detail__back {
   display: inline-block;

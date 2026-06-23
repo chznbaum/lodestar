@@ -2,19 +2,29 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /**
- * Canonical ordered stages for a `job_detail` run.
+ * Stages belonging to the `job_detail` run (scrape + structure + gap work).
  * `research-gaps` is conditional — it is skipped (marked "skipped" in the strip)
  * when `gap-detect` finds no gaps and routes straight to `fit-score`.
  */
-export const JOB_DETAIL_STAGES = [
+export const DETAIL_STAGES = [
   "jd-scrape",
   "structure-jd",
   "gap-detect",
   "research-gaps",
-  "fit-score",
-  "alignment",
 ] as const;
 
+/** Stages belonging to the `job_scoring` run (fit score + alignment). */
+export const SCORING_STAGES = ["fit-score", "alignment"] as const;
+
+/**
+ * Full canonical ordered stage list across both runs (detail then scoring).
+ * Kept for backwards-compat with any callers that reference it; prefer
+ * `DETAIL_STAGES` / `SCORING_STAGES` for per-strip rendering.
+ */
+export const JOB_DETAIL_STAGES = [...DETAIL_STAGES, ...SCORING_STAGES] as const;
+
+export type DetailStage = (typeof DETAIL_STAGES)[number];
+export type ScoringStage = (typeof SCORING_STAGES)[number];
 export type JobDetailStage = (typeof JOB_DETAIL_STAGES)[number];
 
 /**
@@ -51,9 +61,16 @@ export function cancelRun(runId: string): Promise<void> {
 // Payloads mirror worker.rs's StepEvent.
 export interface RunStepEvent {
   run_id: string;
+  /** Job slug for job_detail/job_scoring runs; empty string for discovery runs. */
+  subject: string;
   stage: string;
   status: string;
   detail?: string;
+}
+
+/** Start a job_scoring run for one slug. Rejects if a run is already in flight for that slug. */
+export function rescoreJob(vaultPath: string, slug: string): Promise<string> {
+  return invoke<string>("rescore_job", { vaultPath, slug });
 }
 
 /** Subscribe to per-step progress. Returns an unlisten fn (call it on teardown). */

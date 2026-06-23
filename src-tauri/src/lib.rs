@@ -51,6 +51,7 @@ pub fn run() {
             job::list_jobs,
             job::get_job,
             job::update_job_field,
+            job::set_job_list_field,
             job::set_job_status,
             check::list_checks,
             check::get_check,
@@ -60,6 +61,7 @@ pub fn run() {
             config::set_config,
             worker::fetch_jobs_for_company,
             worker::fetch_job_details,
+            worker::rescore_job,
             worker::cancel_run,
             watcher::start_vault_watcher
         ])

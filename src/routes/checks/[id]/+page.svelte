@@ -38,7 +38,7 @@
     <h1>{check.slug}</h1>
     <p class="check-detail__meta">
       {check.kind} · {check.trigger} · {check.status} ·
-      {check.companies.join(", ")} ·
+      {check.subject} ·
       {check.roles_found} roles · {check.errors} errors
     </p>
     <p class="check-detail__meta">Cost: ScrapingBee <b>{spend.credits}</b> credits · OpenRouter <b>${(spend.usdMicro / 1e6).toFixed(2)}</b></p>

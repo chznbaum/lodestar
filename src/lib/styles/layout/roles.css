@@ -124,12 +124,27 @@
   animation: roles-pulse 1.2s ease-in-out infinite;
 }
 
+/* Idle variant: dim, no animation — shown while the run is queued but not yet active */
+.roles__livedot--idle {
+  background: var(--muted);
+  animation: none;
+  opacity: 0.5;
+}
+
 @keyframes roles-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.35; transform: scale(0.7); }
 }
 
-/* Step strip — a row of small CSS rectangles advancing through JOB_DETAIL_STAGES */
+/* Phase label preceding each strip ("Detail" / "Scoring" / "queued") */
+.roles__phaselabel {
+  font-size: var(--fs-2xs);
+  color: var(--muted);
+  font-style: normal;
+  letter-spacing: 0.01em;
+}
+
+/* Step strip — a row of small CSS rectangles advancing through a pipeline phase */
 .roles__steps {
   display: inline-flex;
   align-items: center;

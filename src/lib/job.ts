@@ -47,7 +47,6 @@ export interface Job {
   researched: string[];
   /** new | detailed | scored | selected | applied | skipped */
   status: string | null;
-  skip_reason: string | null;
   jd_raw_file: string | null;
   /** Derived: a structured JD has been fetched (powers the gate's new-vs-already-fetched). */
   jd_fetched: boolean;

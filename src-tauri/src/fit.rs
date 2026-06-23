@@ -435,7 +435,6 @@ mod tests {
             fit_domain: None,
             researched: vec![],
             status: None,
-            skip_reason: None,
             jd_raw_file: None,
             jd_fetched: false,
         }

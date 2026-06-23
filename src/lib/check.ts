@@ -25,7 +25,8 @@ export interface CheckSummary {
   started_at: string | null;
   finished_at: string | null;
   duration: string | null;
-  company_count: number;
+  /** The single entity this run is about (company slug for job_check, job slug for job_detail). */
+  subject: string;
   roles_found: number;
   step_count: number;
   failed_count: number;
@@ -43,7 +44,8 @@ export interface Check {
   started_at: string | null;
   finished_at: string | null;
   duration: string | null;
-  companies: string[];
+  /** The single entity this run is about (company slug for job_check, job slug for job_detail). */
+  subject: string;
   roles_found: number;
   errors: number;
   steps: Step[];

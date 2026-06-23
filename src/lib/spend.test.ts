@@ -42,7 +42,7 @@ describe("totalSpend", () => {
       started_at: null,
       finished_at: null,
       duration: null,
-      companies: [],
+      subject: "",
       roles_found: 0,
       errors: 0,
       steps,

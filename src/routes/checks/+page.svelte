@@ -2,7 +2,7 @@
   import { goto } from "$app/navigation";
   import { companiesStore as cs } from "$lib/companies.svelte";
   import { checksStore } from "$lib/checks.svelte";
-  import { onRunFinished, onRunStep, phaseLabel } from "$lib/pipeline";
+  import { onRunFinished, onRunStep } from "$lib/pipeline";
 
   // companiesStore owns the vault path (persisted in localStorage); reuse it here.
   $effect(() => {
@@ -12,26 +12,17 @@
   });
 
   // A run's check-note writes are self-writes (suppressed by the vault watcher to avoid an echo),
-  // so the ledger refreshes off the pipeline's own terminal event instead. Live step-by-step
-  // progress lives on the company workspace; here we just want the finished run to appear.
-
-  // `currentPhase[runId]` holds the human-readable current stage phrase while a run is active.
-  let currentPhase = $state<Record<string, string>>({});
+  // so the ledger refreshes off the pipeline's own events. Each step reload advances the Steps
+  // column live; the terminal event catches final state.
 
   $effect(() => {
     const subs: (() => void)[] = [];
     let active = true;
     Promise.all([
-      onRunStep((e) => {
-        const label = phaseLabel(e.stage, e.status, e.detail);
-        if (label) {
-          currentPhase = { ...currentPhase, [e.run_id]: label };
-        }
+      onRunStep(() => {
+        checksStore.reload();
       }),
-      onRunFinished((e) => {
-        // Clear the live phase label then reload so the table reflects the terminal state.
-        const { [e.run_id]: _removed, ...rest } = currentPhase;
-        currentPhase = rest;
+      onRunFinished(() => {
         checksStore.reload();
       }),
     ]).then((u) => {
@@ -78,7 +69,7 @@
           <th>Started</th>
           <th>Kind</th>
           <th>Trigger</th>
-          <th>Companies</th>
+          <th>Subject</th>
           <th>Roles</th>
           <th>Steps</th>
           <th>Status</th>
@@ -92,10 +83,10 @@
             <td><a class="checks__row-link" href="/checks/{c.slug}"><span class="checks__mono">{c.started_at ?? c.slug}</span></a></td>
             <td>{c.kind}</td>
             <td>{c.trigger}</td>
-            <td>{c.company_count}</td>
+            <td>{c.subject}</td>
             <td>{c.roles_found}</td>
             <td>{c.step_count}{c.failed_count > 0 ? ` (${c.failed_count} failed)` : ""}</td>
-            <td>{#if c.status === "running" && currentPhase[c.slug]}<span class="checks__phase">{currentPhase[c.slug]}</span>{:else}<span class="checks__status checks__status--{c.status}">{c.status}</span>{/if}</td>
+            <td><span class="checks__status checks__status--{c.status}">{c.status}</span></td>
           </tr>
         {/each}
       </tbody>

@@ -52,21 +52,26 @@ use std::collections::HashSet;
 use std::path::Path;
 
 /// Live progress hook. The Task-6 worker passes a Tauri-emitting impl; tests pass `NoopSink`.
+///
+/// Every method carries the run's `subject` (the single entity the run is about — a company slug
+/// for `job_check`, a job slug for `job_detail`/`job_scoring`) so the frontend can attribute live
+/// progress to a job/company without a separate lookup. For step events the subject is the task's
+/// `target`; `run_finished` derives it from the run note / Check.
 pub trait EventSink: Send + Sync {
-    fn step_done(&self, run_id: &str, stage: &str, status: &str);
-    fn run_finished(&self, run_id: &str, status: &str);
+    fn step_done(&self, run_id: &str, subject: &str, stage: &str, status: &str);
+    fn run_finished(&self, run_id: &str, subject: &str, status: &str);
     /// Emitted immediately after a task is claimed, before execution. Used by the UI to
     /// display the current stage label ("Scraping careers page…" etc.) in real time.
     /// `detail` carries optional sub-phase info (e.g. `Some("stealth")` for the stealth-proxy
     /// re-enqueue attempt) so the UI can show a more specific label.
-    fn step_started(&self, run_id: &str, stage: &str, detail: Option<&str>);
+    fn step_started(&self, run_id: &str, subject: &str, stage: &str, detail: Option<&str>);
 }
 
 pub struct NoopSink;
 impl EventSink for NoopSink {
-    fn step_done(&self, _run_id: &str, _stage: &str, _status: &str) {}
-    fn run_finished(&self, _run_id: &str, _status: &str) {}
-    fn step_started(&self, _run_id: &str, _stage: &str, _detail: Option<&str>) {}
+    fn step_done(&self, _run_id: &str, _subject: &str, _stage: &str, _status: &str) {}
+    fn run_finished(&self, _run_id: &str, _subject: &str, _status: &str) {}
+    fn step_started(&self, _run_id: &str, _subject: &str, _stage: &str, _detail: Option<&str>) {}
 }
 
 /// Write `last_checked = <today>` on the target company note. Ignores errors (logs them) so a
@@ -269,6 +274,53 @@ pub fn start_job_detail(
     Ok(run_id)
 }
 
+/// Open a `checks/` run for the `job_scoring` chain and enqueue the first `fit-score` task.
+/// Mirrors `start_job_detail`'s run reservation, but seeds the SCORING chain (fit-score →
+/// alignment) instead of jd-scrape — scoring reads the job's CURRENT persisted fields, so it must
+/// NOT re-scrape/re-structure (a re-score after a manual edit must not clobber the edit). Used by
+/// the auto-handoff (a completed `job_detail` run) and by the `rescore_job` command. Returns the
+/// run id. The caller is responsible for draining the queue (the active drain or a fresh one).
+pub fn start_scoring_run(
+    queue: &dyn Queue,
+    vault_path: &str,
+    job_slug: &str,
+    today: &str,
+) -> Result<String, String> {
+    std::fs::create_dir_all(Path::new(vault_path).join("checks")).map_err(|e| e.to_string())?;
+    let run_id = next_run_id(vault_path, today)?;
+    let run = Check {
+        slug: run_id.clone(),
+        kind: "job_scoring".into(),
+        trigger: "manual".into(),
+        status: "running".into(),
+        started_at: Some(now_iso()),
+        finished_at: None,
+        duration: None,
+        // A job_scoring run is ABOUT the job (its subject), mirroring job_detail.
+        subject: job_slug.to_string(),
+        roles_found: 0,
+        errors: 0,
+        steps: vec![],
+    };
+    write_check(vault_path, &run)?;
+    if let Err(e) = queue.enqueue(NewTask {
+        run_id: run_id.clone(),
+        stage: "fit-score".into(),
+        class: "script".into(),
+        target: job_slug.to_string(),
+        payload: "{}".into(),
+    }) {
+        // The `running` note was already written to reserve the run id. With no task enqueued it
+        // would sit `running` forever, so mark it `failed` before surfacing the enqueue error.
+        let mut failed = run;
+        failed.status = "failed".into();
+        failed.finished_at = Some(now_iso());
+        let _ = write_check(vault_path, &failed);
+        return Err(format!("enqueue fit-score for {job_slug:?} failed: {e}"));
+    }
+    Ok(run_id)
+}
+
 /// A job that successfully opened a `job_detail` run.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunStart {
@@ -399,6 +451,46 @@ pub fn start_job_detail_runs(
     FetchJobDetailsOutcome { started, skipped, failed }
 }
 
+/// Start a `job_scoring` run for ONE job (the "re-score" action), pure over the queue + vault so
+/// it's unit-testable; the Tauri command wraps this and spawns the drain. Returns the new run id.
+///
+/// Guards (distinct from `start_job_detail_runs`, by design):
+/// - **Missing job** → `Err` (nothing to score).
+/// - **In flight** → `Err` if a `job_detail` OR `job_scoring` run for this slug is already
+///   `running` (don't stack a second scoring pass on top of an active fetch/score).
+/// - **Decided jobs are ALLOWED** (no decided-job refusal): re-scoring a selected/applied/skipped
+///   job is fine — `fit-score`'s `advance_job_status` no-ops on a decision, so the score/narrative
+///   refresh while the human decision status is preserved.
+pub fn start_rescore_run(
+    queue: &dyn Queue,
+    vault_path: &str,
+    slug: &str,
+    today: &str,
+) -> Result<String, String> {
+    // Missing/unreadable job note → nothing to score.
+    let note_path = Path::new(vault_path).join("jobs").join(format!("{slug}.md"));
+    if !note_path.exists() {
+        return Err(format!("job {slug:?} not found"));
+    }
+
+    // In-flight guard: a running per-job run (detail OR scoring) for this subject blocks a re-score.
+    // A checks-read failure degrades to no-dedup (a rare double-score beats blocking every re-score).
+    let in_flight = crate::check::list_checks(vault_path.to_string())
+        .map(|checks| {
+            checks.iter().any(|c| {
+                (c.kind == "job_detail" || c.kind == "job_scoring")
+                    && c.status == "running"
+                    && c.subject == slug
+            })
+        })
+        .unwrap_or(false);
+    if in_flight {
+        return Err(format!("a fetch or score for {slug:?} is already running"));
+    }
+
+    start_scoring_run(queue, vault_path, slug, today)
+}
+
 /// Abort runs left mid-flight because a drain stopped unexpectedly. For each run still `running`:
 /// discard its outstanding queue tasks (so no later drain half-resumes it), then mark the note
 /// `failed` with `reason` recorded as a synthetic `drain` step. Runs already in a terminal state
@@ -440,6 +532,36 @@ pub fn abort_running_runs(
     aborted
 }
 
+/// Compute the set of run ids a drain must abort on a fatal pump error: the explicitly-owned
+/// runs PLUS any `running` `job_scoring` run whose `subject` matches an owned run's subject
+/// (so handed-off scoring children aren't left phantom-`running`). Reads all checks exactly
+/// once; a read failure degrades to aborting only the owned runs (matching the documented
+/// contract) rather than the previous "first read ok + second read fails → silently miss
+/// scoring children" wrinkle.
+pub(crate) fn abort_set(vault_path: &str, owned_run_ids: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = owned_run_ids.to_vec();
+    // Single read: used for both the owned-subject lookup AND the scoring-child scan.
+    let checks = match crate::check::list_checks(vault_path.to_string()) {
+        Ok(cs) => cs,
+        Err(_) => return ids, // degrade to owned-only on read failure
+    };
+    let owned_subjects: HashSet<String> = checks
+        .iter()
+        .filter(|c| owned_run_ids.iter().any(|o| o == &c.slug))
+        .map(|c| c.subject.clone())
+        .collect();
+    for c in &checks {
+        if c.kind == "job_scoring"
+            && c.status == "running"
+            && owned_subjects.contains(&c.subject)
+            && !ids.contains(&c.slug)
+        {
+            ids.push(c.slug.clone());
+        }
+    }
+    ids
+}
+
 /// Mark a run as `failed` with a human-readable error. The scrape step row was already
 /// written by `run_scrape_step`; here we ONLY annotate its `error` field with the friendly
 /// reason (no second append). A single `write_check` persists everything.
@@ -457,7 +579,11 @@ fn fail_run(
     error_msg: &str,
     sink: &dyn EventSink,
 ) {
+    // `target` is the task target (= the run's subject for job_detail/job_scoring/job_check);
+    // used as the event subject if the run note can't be read for the authoritative value.
+    let mut subject = target.to_string();
     if let Ok(mut run) = get_check(vault_path.to_string(), run_id.to_string()) {
+        subject = run.subject.clone();
         // Stamp last_checked first (job_check only — target is a company slug) so a stamp failure
         // can ride along on the run as a warning rather than an eprintln-only drop.
         let stamp_warning = if run.kind == "job_check" {
@@ -498,7 +624,7 @@ fn fail_run(
     // NOTE: if get_check fails we cannot determine the run kind, so we do NOT stamp.
     // Corruption of a job note (wrong kind stamped as a company) is worse than missing a stamp.
     eprintln!("run {run_id} failed: {error_msg}");
-    sink.run_finished(run_id, "failed");
+    sink.run_finished(run_id, &subject, "failed");
 }
 
 /// The shared core every stage class funnels its failures into — what `pump_once` does with a
@@ -643,7 +769,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
     if is_cancelled(&task.run_id) {
         // The run was cancelled: drop this task without dispatching.
         queue.complete(task.id)?;
-        sink.step_done(&task.run_id, &task.stage, "cancelled");
+        sink.step_done(&task.run_id, &task.target, &task.stage, "cancelled");
         // Finalize the run exactly once. Subsequent cancelled tasks of the same run see status
         // already "cancelled" and skip the write. Do NOT stamp last_checked — cancel ≠ "we looked".
         if let Ok(mut run) = get_check(vault_path.to_string(), task.run_id.clone()) {
@@ -651,7 +777,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
                 run.status = "cancelled".into();
                 run.finished_at = Some(now_iso());
                 let _ = write_check(vault_path, &run);
-                sink.run_finished(&task.run_id, "cancelled");
+                sink.run_finished(&task.run_id, &run.subject, "cancelled");
             }
         }
         return Ok(true);
@@ -664,7 +790,7 @@ pub fn pump_once<S: Scraper, L: Llm>(
         // --- Scrape stage: typed failure + per-class retry policy ---
         let p: ScrapePayload = serde_json::from_str(&task.payload).map_err(|e| e.to_string())?;
         let scrape_detail = if p.tier == "stealth" { Some("stealth") } else { None };
-        sink.step_started(&task.run_id, &task.stage, scrape_detail);
+        sink.step_started(&task.run_id, &task.target, &task.stage, scrape_detail);
         let tier = p.proxy_tier();
         match run_scrape_step(vault_path, &task.run_id, &p.careers_url, &task.target, &task.stage, tier, scraper) {
             Ok(scraped) => {
@@ -713,10 +839,10 @@ pub fn pump_once<S: Scraper, L: Llm>(
                     payload: succ_payload,
                 })?;
                 queue.complete(task.id)?;
-                sink.step_done(&task.run_id, &task.stage, "ok");
+                sink.step_done(&task.run_id, &task.target, &task.stage, "ok");
             }
             Err(scrape_err) => {
-                sink.step_done(&task.run_id, &task.stage, "failed");
+                sink.step_done(&task.run_id, &task.target, &task.stage, "failed");
                 // Map scrape's FailureClass into the shared Disposition, then apply uniformly.
                 let (disposition, reason): (Disposition, String) = match scrape_err.class {
                     FailureClass::Terminal => {
@@ -809,21 +935,54 @@ pub fn pump_once<S: Scraper, L: Llm>(
     }
 
     // --- Non-scrape stages (LLM, script): simple bounded retry via MAX_ATTEMPTS ---
-    sink.step_started(&task.run_id, &task.stage, None);
+    sink.step_started(&task.run_id, &task.target, &task.stage, None);
     match dispatch_non_scrape(&task, vault_path, cfg, llm) {
         Ok(successors) => {
             for s in successors {
                 queue.enqueue(s)?;
             }
             queue.complete(task.id)?;
-            sink.step_done(&task.run_id, &task.stage, "ok");
-            // Emit run-complete for both terminal stages of their respective chains.
-            if matches!(task.stage.as_str(), "finalize" | "alignment") {
-                sink.run_finished(&task.run_id, "complete");
+            sink.step_done(&task.run_id, &task.target, &task.stage, "ok");
+            // A terminal arm closes its own run `complete` (finalize / alignment /
+            // gap-detect-no-gaps / research-gaps); every non-terminal arm leaves it `running`.
+            // So a freshly-read `complete` here means THIS dispatch was the run's terminal step —
+            // the signal to emit `run_finished` AND, for a `job_detail` run, hand off to scoring.
+            if let Ok(run) = get_check(vault_path.to_string(), task.run_id.clone()) {
+                if run.status == "complete" {
+                    sink.run_finished(&task.run_id, &run.subject, "complete");
+                    // Handoff: a completed `job_detail` run seeds a `job_scoring` run for the same
+                    // subject into the SAME queue, so the active drain runs it straight through
+                    // (fit-score → alignment). A detail FAILURE never reaches here, so no scoring
+                    // starts and the job stays at its reached state.
+                    if run.kind == "job_detail" {
+                        let today = task.run_id.get(..10).unwrap_or(&task.run_id);
+                        if let Err(e) =
+                            start_scoring_run(queue, vault_path, &run.subject, today)
+                        {
+                            // Surface the missed handoff as a visible warning step on the detail
+                            // run rather than an eprintln-only silent swallow. The detail run stays
+                            // `complete` and the job stays `detailed` — scoring just didn't start.
+                            // The user/checks-page sees the warning step and can trigger a re-score.
+                            let _ = record_step_warned(
+                                vault_path,
+                                &task.run_id,
+                                "scoring-handoff",
+                                "script",
+                                &run.subject,
+                                now_iso(),
+                                vec![format!(
+                                    "auto-scoring did not start for {}: {e}",
+                                    run.subject
+                                )],
+                                None,
+                            );
+                        }
+                    }
+                }
             }
         }
         Err(failure) => {
-            sink.step_done(&task.run_id, &task.stage, "failed");
+            sink.step_done(&task.run_id, &task.target, &task.stage, "failed");
             // Per-class disposition: LLM-call failures retry; parse/write, script, and incidental
             // errors are terminal — re-calling the LLM can't fix a deterministic failure.
             apply_disposition(failure.disposition(), &task, failure.reason(), queue, vault_path, sink)?;
@@ -951,7 +1110,6 @@ fn dispatch_non_scrape<L: Llm>(
                     fit_domain: None,
                     researched: vec![],
                     status: Some("new".to_string()),
-                    skip_reason: None,
                     jd_raw_file: None,
                     jd_fetched: false,
                 };
@@ -1025,13 +1183,12 @@ fn dispatch_non_scrape<L: Llm>(
             let gaps = detect_gaps(&job);
             record_step(vault_path, run_id, "gap-detect", "script", slug, started, "ok", None, None)?;
             if gaps.is_empty() {
-                Ok(vec![NewTask {
-                    run_id: run_id.into(),
-                    stage: "fit-score".into(),
-                    class: "script".into(),
-                    target: slug.to_string(),
-                    payload: "{}".into(),
-                }])
+                // No gaps to research → this is the detail run's terminal. Close the detail run
+                // `complete`; the handoff to a `job_scoring` run happens at the pump_once seam.
+                // (The job is already `detailed` from structure-jd; scoring is a SEPARATE run so a
+                // later re-score won't re-scrape/re-structure and clobber a manual edit.)
+                close_detail_run(vault_path, run_id)?;
+                Ok(vec![])
             } else {
                 Ok(vec![NewTask {
                     run_id: run_id.into(),
@@ -1195,13 +1352,10 @@ fn dispatch_non_scrape<L: Llm>(
                 )?;
             }
 
-            Ok(vec![NewTask {
-                run_id: run_id.into(),
-                stage: "fit-score".into(),
-                class: "script".into(),
-                target: slug.to_string(),
-                payload: "{}".into(),
-            }])
+            // research-gaps is the detail run's terminal. Close it `complete`; the handoff to a
+            // `job_scoring` run happens at the pump_once seam (scoring reads the now-researched job).
+            close_detail_run(vault_path, run_id)?;
+            Ok(vec![])
         }
         "fit-score" => {
             let slug = task.target.as_str();
@@ -1420,17 +1574,25 @@ fn dispatch_non_scrape<L: Llm>(
                 record_step_warned(vault_path, run_id, "alignment", "llm", slug, started, warnings, cost)?;
             }
 
-            // Close the run complete (mirror finalize). A job_detail run NEVER stamps
-            // company.last_checked — that's job_check ("we looked for roles") semantics.
-            let mut run = get_check(vault_path.to_string(), run_id.to_string())?;
-            run.status = "complete".into();
-            run.finished_at = Some(now_iso());
-            write_check(vault_path, &run)?;
+            // Close the scoring run complete (mirror finalize). A job_detail/job_scoring run NEVER
+            // stamps company.last_checked — that's job_check ("we looked for roles") semantics.
+            close_detail_run(vault_path, run_id)?;
 
             Ok(vec![])
         }
         other => Err(StepFailure::Step(format!("unknown stage: {other}"))),
     }
+}
+
+/// Close a per-job run (`job_detail` or `job_scoring`) as `complete`. Used by every terminal arm
+/// of those chains. A per-job run NEVER stamps `company.last_checked` — that's `job_check`
+/// ("we looked for roles") semantics, not "we looked at this one job".
+fn close_detail_run(vault_path: &str, run_id: &str) -> Result<(), StepFailure> {
+    let mut run = get_check(vault_path.to_string(), run_id.to_string())?;
+    run.status = "complete".into();
+    run.finished_at = Some(now_iso());
+    write_check(vault_path, &run)?;
+    Ok(())
 }
 
 /// Write structured JD fields to the job note. For each populated scalar field, calls
@@ -2737,34 +2899,45 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Test 4: gap-detect with no gaps → enqueues fit-score (no research-gaps occurs).
-    /// A fully-populated job; gap-detect enqueues fit-score directly; research-gaps not called.
+    /// Test 4: gap-detect with no gaps is the detail run's TERMINAL — it skips research-gaps and
+    /// completes the `job_detail` run (no fit-score enqueued INTO the detail run; scoring is its own
+    /// run, started by the handoff at the pump_once seam). A fully-populated job; research-gaps and
+    /// the LLM are never touched in the detail run.
     #[test]
-    fn gap_detect_no_gaps_enqueues_fit_score() {
-        use crate::llm::tests::FakeLlm;
+    fn gap_detect_no_gaps_completes_detail_run_without_research() {
         use crate::scraper::tests::FakeScraper;
 
         let slug = "eng-full";
         // A stub with all researchable fields populated so detect_gaps returns empty.
-        let stub = "---\nid: eng-full\ntitle: \"Engineer\"\ncompany: \"[[full]]\"\nurl: https://full.com/jobs/1\nstatus: new\ncomp_low: 150000\ncomp_high: 200000\ncomp_currency: USD\ncomp_period: annual\ncomp_equity: 0.1-0.5%\nremote: remote\nlocation_constraints: US only\nvisa_sponsorship: offered\nrelocation: not_offered\nemployment_type: full_time\nyoe_min: 5\ntech_stack: [Rust]\nreports_to: CTO\nteam: Platform\ncountries: [US]\n---\n";
+        let stub = "---\nid: eng-full\ntitle: \"Engineer\"\ncompany: \"[[full]]\"\nurl: https://full.com/jobs/1\nstatus: detailed\ncomp_low: 150000\ncomp_high: 200000\ncomp_currency: USD\ncomp_period: annual\ncomp_equity: 0.1-0.5%\nremote: remote\nlocation_constraints: US only\nvisa_sponsorship: offered\nrelocation: not_offered\nemployment_type: full_time\nyoe_min: 5\ntech_stack: [Rust]\nreports_to: CTO\nteam: Platform\ncountries: [US]\n---\n";
         let (dir, vault, run_id, q) = enqueue_stage("gap-detect", "script", slug, "{}", stub);
 
-        // LLM should NOT be called at all (gap-detect is a script stage and with no gaps,
-        // it enqueues fit-score which is unknown and causes drain to stop without LLM).
-        let llm = FakeLlm { reply: "should-not-be-called".into(), cost_micro_usd: 0 };
+        // LLM must never be called (gap-detect is a script stage; no-gaps skips research-gaps).
+        let llm = AlwaysOkLlm { reply: "should-not-be-called".into() };
         let scraper = FakeScraper { content: String::new(), credits: 0 };
         let cfg = default_config();
-        while pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap() {}
+        // Pump exactly the gap-detect task (the handoff enqueues a scoring fit-score we don't drain).
+        pump_once(&q, &vault, &cfg, &scraper, &llm, &NoopSink, &|_| false).unwrap();
 
-        // gap-detect step must be recorded as "ok".
+        // gap-detect step must be recorded as "ok" and the detail run must be `complete`.
         let run = get_check(vault.clone(), run_id.clone()).unwrap();
         let gd_step = run.steps.iter().find(|s| s.stage == "gap-detect").expect("gap-detect step");
         assert_eq!(gd_step.status, "ok");
-        // research-gaps step must NOT have been recorded.
+        assert_eq!(run.status, "complete", "no-gaps gap-detect must complete the detail run");
+        // research-gaps and fit-score must NOT have been recorded IN THE DETAIL RUN.
         assert!(
             !run.steps.iter().any(|s| s.stage == "research-gaps"),
             "research-gaps must not run when no gaps detected"
         );
+        assert!(
+            !run.steps.iter().any(|s| s.stage == "fit-score"),
+            "fit-score must NOT be enqueued into the detail run (it's a separate scoring run)"
+        );
+        // The handoff seeded a separate job_scoring run for the same subject.
+        let checks = crate::check::list_checks(vault.clone()).unwrap();
+        let scoring: Vec<_> = checks.iter().filter(|c| c.kind == "job_scoring").collect();
+        assert_eq!(scoring.len(), 1, "the handoff must create a job_scoring run; checks: {checks:?}");
+        assert_eq!(scoring[0].subject, slug);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2973,25 +3146,31 @@ mod tests {
         dir
     }
 
-    /// The whole job_detail chain end-to-end: scrape → structure-jd → gap-detect → research-gaps →
-    /// fit-score → alignment → complete. Asserts a fit_score landed, the alignment narrative landed,
-    /// the run reached terminal `complete`, and both new steps were recorded.
+    /// A full fetch drains through BOTH runs over the SINGLE shared queue: a `job_detail` run
+    /// (jd-scrape → structure-jd → gap-detect → research-gaps → [detail complete]) hands off to a
+    /// `job_scoring` run (fit-score → alignment → [scoring complete]). Asserts the end state is
+    /// unchanged from the pre-split chain — the job is `scored` with all five sub-scores + the
+    /// alignment narrative — AND that two distinct runs (different kinds, same subject) were created,
+    /// with detail/scoring steps living in their OWN runs (the split is real, not cosmetic).
     #[test]
-    fn full_job_detail_chain_scores_and_aligns_and_completes() {
+    fn full_fetch_drains_detail_then_scoring_two_runs() {
         use crate::scraper::tests::FakeScraper;
 
         let dir = job_detail_chain_fixture();
         let vault = dir.to_str().unwrap();
         let queue = SqliteQueue::open(&dir.join("queue.db")).unwrap();
-        let run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-19").unwrap();
+        let detail_run_id = start_job_detail(&queue, vault, "senior-engineer-acme", "2026-06-19").unwrap();
 
         let scraper = FakeScraper { content: "<p>jd</p>".into(), credits: 5 };
         let llm = StageScriptedLlm;
         let cfg = default_config();
         let sink = NoopSink;
         let never = |_: &str| false;
+        // The detail run's completion seeds the scoring run into the SAME queue, so this single
+        // drain loop runs the whole fetch→score handoff straight through.
         while pump_once(&queue, vault, &cfg, &scraper, &llm, &sink, &never).unwrap() {}
 
+        // ── End state (must match the pre-split chain) ───────────────────────────────────────
         let txt = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
         let j = crate::job::parse_job("senior-engineer-acme", &txt).unwrap();
         assert!(j.fit_score.is_some(), "fit_score must be written; note:\n{txt}");
@@ -3001,22 +3180,268 @@ mod tests {
         assert!(j.fit_comp.is_some(), "fit_comp must be written; note:\n{txt}");
         assert!(j.fit_arrangement.is_some(), "fit_arrangement must be written; note:\n{txt}");
         assert!(j.fit_domain.is_some(), "fit_domain must be written; note:\n{txt}");
-        // fit-score must advance status to "scored".
-        assert_eq!(j.status.as_deref(), Some("scored"), "fit-score must advance job status to scored; note:\n{txt}");
+        // The job passed through `detailed` (structure-jd) then `scored` (fit-score).
+        assert_eq!(j.status.as_deref(), Some("scored"), "the job must end `scored`; note:\n{txt}");
         assert!(
             txt.contains("## Alignment analysis") && txt.contains("Worth pursuing"),
             "alignment narrative must be written:\n{txt}"
         );
 
-        let run = get_check(vault.to_string(), run_id).unwrap();
-        assert_eq!(run.status, "complete", "run must reach terminal complete; steps: {:?}", run.steps);
+        // ── Two-run structure: detail + scoring, distinct kinds, SAME subject ─────────────────
+        let checks = crate::check::list_checks(vault.to_string()).unwrap();
+        let detail: Vec<_> = checks.iter().filter(|c| c.kind == "job_detail").collect();
+        let scoring: Vec<_> = checks.iter().filter(|c| c.kind == "job_scoring").collect();
+        assert_eq!(detail.len(), 1, "exactly one job_detail run; checks: {checks:?}");
+        assert_eq!(scoring.len(), 1, "the handoff must create exactly one job_scoring run; checks: {checks:?}");
+        assert_eq!(detail[0].subject, "senior-engineer-acme");
+        assert_eq!(scoring[0].subject, "senior-engineer-acme", "both runs share the same subject");
+        assert_ne!(detail[0].slug, scoring[0].slug, "they are two distinct runs");
+        assert_eq!(detail[0].slug, detail_run_id);
+        assert_eq!(detail[0].status, "complete", "the detail run completes");
+        assert_eq!(scoring[0].status, "complete", "the scoring run completes");
+
+        // The detail run carries detail steps and NOT scoring steps; the scoring run, the reverse.
+        let detail_run = get_check(vault.to_string(), detail[0].slug.clone()).unwrap();
+        let scoring_run = get_check(vault.to_string(), scoring[0].slug.clone()).unwrap();
         assert!(
-            run.steps.iter().any(|s| s.stage == "fit-score" && s.class == "script"),
-            "a fit-score script step must be recorded"
+            detail_run.steps.iter().any(|s| s.stage == "structure-jd"),
+            "detail run must record structure-jd; steps: {:?}", detail_run.steps
         );
         assert!(
-            run.steps.iter().any(|s| s.stage == "alignment" && s.class == "llm"),
-            "an alignment llm step must be recorded"
+            !detail_run.steps.iter().any(|s| s.stage == "fit-score" || s.stage == "alignment"),
+            "the detail run must NOT carry scoring steps (the split is real); steps: {:?}", detail_run.steps
+        );
+        assert!(
+            scoring_run.steps.iter().any(|s| s.stage == "fit-score" && s.class == "script"),
+            "scoring run must record a fit-score script step; steps: {:?}", scoring_run.steps
+        );
+        assert!(
+            scoring_run.steps.iter().any(|s| s.stage == "alignment" && s.class == "llm"),
+            "scoring run must record an alignment llm step; steps: {:?}", scoring_run.steps
+        );
+        assert!(
+            !scoring_run.steps.iter().any(|s| s.stage == "jd-scrape" || s.stage == "structure-jd"),
+            "the scoring run must NOT re-scrape or re-structure; steps: {:?}", scoring_run.steps
+        );
+
+        // Invariant (Task 11): neither a job_detail NOR a job_scoring run stamps last_checked —
+        // that's job_check ("we looked for roles") semantics, not "we looked at this one job".
+        let company_text = std::fs::read_to_string(dir.join("companies/acme.md")).unwrap();
+        assert!(
+            !company_text.contains("last_checked: 2026"),
+            "a full fetch (detail+scoring) must NOT stamp company.last_checked; got:\n{company_text}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── M3a: scoring run + rescore_job ────────────────────────────────────────
+
+    /// A sink that records every (run_id, subject, stage, status) tuple it receives, so a test can
+    /// assert the `subject` is threaded through the live-progress events. `Mutex` (not `RefCell`)
+    /// so it satisfies `EventSink`'s `Send + Sync` bound without unsafe.
+    #[derive(Default)]
+    struct RecordingSink {
+        events: std::sync::Mutex<Vec<(String, String, String, String)>>,
+    }
+    impl RecordingSink {
+        fn snapshot(&self) -> Vec<(String, String, String, String)> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+    impl EventSink for RecordingSink {
+        fn step_done(&self, run_id: &str, subject: &str, stage: &str, status: &str) {
+            self.events.lock().unwrap().push((run_id.into(), subject.into(), stage.into(), status.into()));
+        }
+        fn run_finished(&self, run_id: &str, subject: &str, status: &str) {
+            self.events.lock().unwrap().push((run_id.into(), subject.into(), "<finished>".into(), status.into()));
+        }
+        fn step_started(&self, run_id: &str, subject: &str, stage: &str, _detail: Option<&str>) {
+            self.events.lock().unwrap().push((run_id.into(), subject.into(), stage.into(), "running".into()));
+        }
+    }
+
+    /// Enriched vault whose job is already `detailed` (post-fetch), so a SCORING run can run
+    /// fit-score then alignment without any scrape/structure-jd. Mirrors `job_detail_chain_fixture`'s
+    /// supporting notes (company/competencies/experience/positioning/target_criteria) so fit-score
+    /// and alignment have the context they read. `status` is a parameter so a test can prove the
+    /// human-decision-preserving path (e.g. a `selected` job re-scored).
+    fn scorable_job_fixture(status: &str) -> std::path::PathBuf {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-rescore-{}-{}", std::process::id(), n));
+        for sub in [
+            "jobs", "jobs/_jd", "checks", "companies", "competencies",
+            "profile/accomplishments", "profile/experience",
+        ] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        // A detailed job with the fields fit-score reads, plus a jd_raw_file alignment will read.
+        std::fs::write(
+            dir.join("jobs/senior-engineer-acme.md"),
+            format!(
+                "---\nid: senior-engineer-acme\ntitle: \"Senior Engineer\"\ncompany: \"[[acme]]\"\nurl: https://acme.com/jobs/1\nlevel: senior\nremote: remote\ncomp_low: 180000\ncomp_high: 220000\ncomp_currency: USD\ncomp_period: annual\nrequired_skills: [rust]\njd_raw_file: jobs/_jd/senior-engineer-acme.md\nstatus: {status}\n---\n"
+            ),
+        ).unwrap();
+        std::fs::write(dir.join("jobs/_jd/senior-engineer-acme.md"), "Senior platform role. 5y Rust.").unwrap();
+        std::fs::write(
+            dir.join("companies/acme.md"),
+            "---\nid: acme\nname: \"Acme\"\ncareers_url: https://acme.com/jobs\ndomain: [dev_tools]\nstatus: active\nlast_checked:\n---\n\n## Notes\n\nGreat dev-tools company.\n",
+        ).unwrap();
+        std::fs::write(
+            dir.join("profile/target_criteria.md"),
+            "---\ntype: target_criteria\nwork_arrangements: [remote]\ntarget_levels: [senior, dept-head]\ncomp_floor: 150000\ncomp_target: 220000\ncomp_currency: USD\nwork_authorization: [US]\npreferred_domains: [dev_tools]\nmatch_titles:\n  - engineer\n---\n",
+        ).unwrap();
+        std::fs::write(dir.join("competencies/rust.md"), "---\nid: rust\nname: Rust\n---\n").unwrap();
+        std::fs::write(
+            dir.join("profile/positioning.md"),
+            "---\ntype: positioning\n---\n## Primary narrative\nFounding engineer.\n",
+        ).unwrap();
+        dir
+    }
+
+    /// `start_rescore_run` on an already-detailed job runs fit-score + alignment and updates the
+    /// score, WITHOUT any scrape/structure-jd step (it's a SCORING run, not a fetch). Asserts the
+    /// scoring run records fit-score + alignment, records NO jd-scrape/structure-jd, and the job
+    /// ends `scored` with all five sub-scores + the alignment narrative written.
+    #[test]
+    fn rescore_runs_fit_and_alignment_without_any_scrape() {
+        let dir = scorable_job_fixture("detailed");
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_rescore_run(&q, vault, "senior-engineer-acme", "2026-06-22").unwrap();
+
+        // A scraper that PANICS if called — proves the scoring run never scrapes.
+        struct PanicScraper;
+        impl Scraper for PanicScraper {
+            fn fetch(&self, _u: &str, _t: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
+                panic!("a scoring run must never scrape");
+            }
+        }
+        let llm = StageScriptedLlm; // alignment branch returns the narrative
+        let cfg = default_config();
+        while pump_once(&q, vault, &cfg, &PanicScraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let txt = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
+        let j = crate::job::parse_job("senior-engineer-acme", &txt).unwrap();
+        assert!(j.fit_score.is_some(), "fit_score must be (re)written; note:\n{txt}");
+        assert!(j.fit_seniority.is_some() && j.fit_skills.is_some() && j.fit_comp.is_some()
+            && j.fit_arrangement.is_some() && j.fit_domain.is_some(), "all five sub-scores written");
+        assert_eq!(j.status.as_deref(), Some("scored"), "fit-score advances detailed→scored");
+        assert!(txt.contains("## Alignment analysis"), "alignment narrative must be written:\n{txt}");
+
+        let run = get_check(vault.to_string(), run_id).unwrap();
+        assert_eq!(run.kind, "job_scoring");
+        assert_eq!(run.status, "complete");
+        assert!(run.steps.iter().any(|s| s.stage == "fit-score"), "fit-score step recorded");
+        assert!(run.steps.iter().any(|s| s.stage == "alignment"), "alignment step recorded");
+        assert!(
+            !run.steps.iter().any(|s| s.stage == "jd-scrape" || s.stage == "structure-jd"),
+            "a scoring run must NOT record any scrape/structure-jd step; steps: {:?}", run.steps
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Re-scoring a job with a HUMAN DECISION (`selected`) refreshes the score but PRESERVES the
+    /// decision status — `fit-score`'s `advance_job_status` no-ops on a decided state. (This is why
+    /// rescore, unlike `start_job_detail_runs`, does NOT refuse decided jobs.)
+    #[test]
+    fn rescore_preserves_human_decision_status() {
+        let dir = scorable_job_fixture("selected");
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        start_rescore_run(&q, vault, "senior-engineer-acme", "2026-06-22").unwrap();
+
+        struct NoScrape;
+        impl Scraper for NoScrape {
+            fn fetch(&self, _u: &str, _t: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
+                panic!("scoring must not scrape");
+            }
+        }
+        let llm = StageScriptedLlm;
+        while pump_once(&q, vault, &default_config(), &NoScrape, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let txt = std::fs::read_to_string(dir.join("jobs/senior-engineer-acme.md")).unwrap();
+        let j = crate::job::parse_job("senior-engineer-acme", &txt).unwrap();
+        assert_eq!(j.status.as_deref(), Some("selected"), "a human decision must be preserved across a re-score; note:\n{txt}");
+        assert!(j.fit_score.is_some(), "the score must still refresh; note:\n{txt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Re-score dedup: a `job_detail` OR `job_scoring` run already `running` for the slug → `Err`
+    /// (no second run stacked), and no task is enqueued.
+    #[test]
+    fn rescore_skips_when_a_run_is_already_in_flight() {
+        for in_flight_kind in ["job_detail", "job_scoring"] {
+            let dir = scorable_job_fixture("detailed");
+            let vault = dir.to_str().unwrap();
+            let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+            // A run for this subject is already in flight.
+            let running = crate::check::Check {
+                slug: "2026-06-21-0001".into(), kind: in_flight_kind.into(), trigger: "manual".into(),
+                status: "running".into(), started_at: Some(now_iso()), finished_at: None, duration: None,
+                subject: "senior-engineer-acme".into(), roles_found: 0, errors: 0, steps: vec![],
+            };
+            crate::check::write_check(vault, &running).unwrap();
+
+            let result = start_rescore_run(&q, vault, "senior-engineer-acme", "2026-06-22");
+            assert!(result.is_err(), "an in-flight {in_flight_kind} run must block a re-score");
+            assert!(
+                result.unwrap_err().contains("already running"),
+                "the error must explain the in-flight guard"
+            );
+            assert!(q.claim_next().unwrap().is_none(), "a skipped re-score enqueues no task");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    /// Re-score of a non-existent job → `Err` (nothing to score), no run created, no task enqueued.
+    #[test]
+    fn rescore_missing_job_is_err() {
+        let dir = scorable_job_fixture("detailed");
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+
+        let result = start_rescore_run(&q, vault, "no-such-job", "2026-06-22");
+        assert!(result.is_err(), "a missing job must error");
+        assert!(result.unwrap_err().contains("not found"), "the error must say the job wasn't found");
+        assert!(q.claim_next().unwrap().is_none(), "no task for a missing job");
+        // No checks note for the missing slug was created.
+        assert!(crate::check::list_checks(vault.to_string()).unwrap().is_empty(), "no run created");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Live-progress events carry the run's `subject`. Drive a scoring run with a recording sink and
+    /// assert every emitted event names the job slug as subject (step_started/step_done/run_finished).
+    #[test]
+    fn events_carry_the_run_subject() {
+        let dir = scorable_job_fixture("detailed");
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_rescore_run(&q, vault, "senior-engineer-acme", "2026-06-22").unwrap();
+
+        struct NoScrape;
+        impl Scraper for NoScrape {
+            fn fetch(&self, _u: &str, _t: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
+                panic!("scoring must not scrape");
+            }
+        }
+        let sink = RecordingSink::default();
+        let llm = StageScriptedLlm;
+        while pump_once(&q, vault, &default_config(), &NoScrape, &llm, &sink, &|_| false).unwrap() {}
+
+        let events = sink.snapshot();
+        assert!(!events.is_empty(), "the scoring run must have emitted events");
+        // Every event for this run names the subject (the job slug) — no separate lookup needed.
+        for (rid, subject, stage, status) in events.iter() {
+            if rid == &run_id {
+                assert_eq!(subject, "senior-engineer-acme", "event {stage}/{status} must carry the subject");
+            }
+        }
+        // And specifically the terminal run_finished carries it.
+        assert!(
+            events.iter().any(|(rid, subj, stage, status)|
+                rid == &run_id && stage == "<finished>" && status == "complete"
+                && subj == "senior-engineer-acme"),
+            "run_finished must carry subject; events: {events:?}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3193,6 +3618,94 @@ mod tests {
         assert_eq!(r2.status, "complete", "a terminal run must be left untouched");
 
         assert!(q.claim_next().unwrap().is_none(), "the aborted run's outstanding task is discarded");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `abort_set` must return the owned run ids PLUS any running `job_scoring` run whose
+    /// subject matches an owned run's subject (a handed-off scoring child). It must NOT include
+    /// an unrelated running run with a different subject.
+    ///
+    /// Seeds:
+    ///   - detail-run-A: `completed` job_detail for slug A (the owned run)
+    ///   - scoring-run-A: `running` job_scoring for slug A (the handed-off child — NOT in owned set)
+    ///   - unrelated-run-B: `running` job_scoring for slug B (different subject — must be excluded)
+    ///
+    /// This locks in the "no phantom run after a drain abort" guarantee.
+    #[test]
+    fn abort_set_includes_scoring_child_by_subject_not_unrelated_run() {
+        let n = SEQ.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("lodestar-abortset-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(dir.join("checks")).unwrap();
+        let vault = dir.to_str().unwrap();
+
+        // Owned run: a completed job_detail for slug-a.
+        let detail_run_id = "2026-06-22-0001";
+        let detail = crate::check::Check {
+            slug: detail_run_id.into(),
+            kind: "job_detail".into(),
+            trigger: "manual".into(),
+            status: "complete".into(),
+            started_at: Some(now_iso()),
+            finished_at: Some(now_iso()),
+            duration: None,
+            subject: "slug-a".into(),
+            roles_found: 0,
+            errors: 0,
+            steps: vec![],
+        };
+        write_check(vault, &detail).unwrap();
+
+        // Scoring child: a running job_scoring for slug-a — the handoff-spawned run NOT in owned set.
+        let scoring_run_id = "2026-06-22-0002";
+        let scoring = crate::check::Check {
+            slug: scoring_run_id.into(),
+            kind: "job_scoring".into(),
+            trigger: "manual".into(),
+            status: "running".into(),
+            started_at: Some(now_iso()),
+            finished_at: None,
+            duration: None,
+            subject: "slug-a".into(), // same subject as detail run
+            roles_found: 0,
+            errors: 0,
+            steps: vec![],
+        };
+        write_check(vault, &scoring).unwrap();
+
+        // Unrelated run: a running job_scoring for slug-b — different subject, must NOT be included.
+        let unrelated_run_id = "2026-06-22-0003";
+        let unrelated = crate::check::Check {
+            slug: unrelated_run_id.into(),
+            kind: "job_scoring".into(),
+            trigger: "manual".into(),
+            status: "running".into(),
+            started_at: Some(now_iso()),
+            finished_at: None,
+            duration: None,
+            subject: "slug-b".into(), // different subject
+            roles_found: 0,
+            errors: 0,
+            steps: vec![],
+        };
+        write_check(vault, &unrelated).unwrap();
+
+        // Owned set is only the detail run.
+        let result = abort_set(vault, &[detail_run_id.to_string()]);
+
+        assert!(
+            result.contains(&detail_run_id.to_string()),
+            "abort_set must include the owned detail run; got: {result:?}"
+        );
+        assert!(
+            result.contains(&scoring_run_id.to_string()),
+            "abort_set must include the scoring child matched by subject; got: {result:?}"
+        );
+        assert!(
+            !result.contains(&unrelated_run_id.to_string()),
+            "abort_set must NOT include the unrelated run (different subject); got: {result:?}"
+        );
+        assert_eq!(result.len(), 2, "abort_set must return exactly 2 ids; got: {result:?}");
+
         std::fs::remove_dir_all(&dir).ok();
     }
 

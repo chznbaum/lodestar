@@ -43,7 +43,6 @@ const mk = (over: Partial<Job>): Job => ({
   fit_domain: null,
   researched: [],
   status: "new",
-  skip_reason: null,
   jd_raw_file: null,
   jd_fetched: false,
   ...over,

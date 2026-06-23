@@ -12,13 +12,14 @@
     REMOTE_KINDS,
     SPONSORSHIP,
   } from "$lib/job";
-  import { jobSections, subScoreRows } from "$lib/jobDetail";
+  import { jobSections, subScoreRows, hasDealbreaker } from "$lib/jobDetail";
   import { fitBand } from "$lib/fit";
   import { classifyStatus, nextHumanStatuses, STATUS_LABELS } from "$lib/jobStatus";
   import { renderMarkdown } from "$lib/markdown";
   import { levelLabel, LEVEL_LABELS } from "$lib/level";
   import { humanize } from "$lib/labels";
   import Combobox from "$lib/Combobox.svelte";
+  import { onRunStep, onRunFinished, phaseLabel, rescoreJob, type RunStepEvent } from "$lib/pipeline";
 
   const slug = $derived(page.params.slug ?? "");
 
@@ -106,6 +107,75 @@
     return allKeys.map((k) => ({ value: k, label: STATUS_LABELS[k as keyof typeof STATUS_LABELS] ?? humanize(k) }));
   });
 
+  // ---------------------------------------------------------------------------
+  // Re-score on edit
+  // ---------------------------------------------------------------------------
+  /** "Re-scoring…" indicator text; empty when idle. */
+  let rescorePhase = $state("");
+  /**
+   * True while a scoring run is in flight for this slug — set when:
+   * (a) maybeRescore enqueues a rescore, or (b) a run:step with a SCORING stage
+   * arrives for this slug (covers a background detail→scoring handoff while the
+   * user is on this page). Cleared on run:finished for this slug.
+   */
+  let scoringInFlight = $state(false);
+  /** Note shown when rescoreJob rejects unexpectedly. */
+  let rescoreNote = $state("");
+
+  // Subscribe to run:step and run:finished events for this slug — always on, torn down on teardown.
+  // Indicator visibility is gated on `scoringInFlight` in the template.
+  $effect(() => {
+    const currentSlug = slug;
+    const subs: (() => void)[] = [];
+    let active = true;
+
+    Promise.all([
+      onRunStep((e: RunStepEvent) => {
+        if (e.subject !== currentSlug) return;
+        // A scoring stage arrived for this slug — mark in-flight (covers the
+        // background detail→scoring handoff when the user is on this page).
+        const isScoringStage = e.stage === "fit-score" || e.stage === "alignment";
+        if (isScoringStage) scoringInFlight = true;
+        if (scoringInFlight) {
+          const label = phaseLabel(e.stage, e.status, e.detail);
+          if (label) rescorePhase = label;
+        }
+      }),
+      onRunFinished(async (e: RunStepEvent) => {
+        if (e.subject !== currentSlug) return;
+        await reload();
+        scoringInFlight = false;
+        rescorePhase = "";
+      }),
+    ]).then((u) => {
+      if (active) subs.push(...u);
+      else u.forEach((f) => f());
+    });
+
+    return () => {
+      active = false;
+      subs.forEach((f) => f());
+    };
+  });
+
+  /** Trigger a rescore if the job is already scored and no scoring run is in flight. */
+  async function maybeRescore() {
+    // Skip if unscored (no point) or if scoring is already running (don't stack).
+    if (!job || !cs.vaultPath || job.fit_score === null || scoringInFlight) return;
+    rescoreNote = "";
+    scoringInFlight = true;
+    rescorePhase = "Re-scoring…";
+    try {
+      await rescoreJob(cs.vaultPath, slug);
+    } catch (e) {
+      // Unexpected error (the job note disappeared mid-edit, etc.) — clear the
+      // flag so the UI doesn't stay stuck, and surface a quiet note.
+      scoringInFlight = false;
+      rescorePhase = "";
+      rescoreNote = `Re-score note: ${e}`;
+    }
+  }
+
   async function handleStatusChange(newStatus: string) {
     if (!job || !cs.vaultPath) return;
     if (newStatus === job.status) return;
@@ -118,78 +188,107 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Inline field editing
+  // Details panel — edit mode (mirrors companies pattern)
   // ---------------------------------------------------------------------------
 
-  // Active edit: { field, value } — only one field editable at a time
-  let editField = $state<string | null>(null);
-  let editValue = $state<string>("");
+  let editingDetails = $state(false);
+  let detailDraft = $state<Record<string, string>>({});
 
-  function startEdit(field: string, current: string) {
-    editField = field;
-    editValue = current;
+  function openDetailEdit() {
+    const j = job;
+    if (!j) return;
+    detailDraft = {
+      comp_low: j.comp_low !== null ? String(j.comp_low) : "",
+      comp_high: j.comp_high !== null ? String(j.comp_high) : "",
+      comp_currency: j.comp_currency ?? "",
+      comp_period: j.comp_period ?? "",
+      comp_equity: j.comp_equity ?? "",
+      required_skills: j.required_skills.join(", "),
+      preferred_skills: j.preferred_skills.join(", "),
+      remote: j.remote ?? "",
+      yoe_min: j.yoe_min !== null ? String(j.yoe_min) : "",
+      employment_type: j.employment_type ?? "",
+      level: j.level ?? "",
+      visa_sponsorship: j.visa_sponsorship ?? "",
+      relocation: j.relocation ?? "",
+      date_posted: j.date_posted ?? "",
+      reports_to: j.reports_to ?? "",
+      team: j.team ?? "",
+      location_constraints: j.location_constraints ?? "",
+    };
+    editingDetails = true;
   }
 
-  function cancelEdit() {
-    editField = null;
-    editValue = "";
+  function cancelDetailEdit() {
+    editingDetails = false;
   }
 
-  async function commitScalar(field: string) {
-    if (!cs.vaultPath || editField !== field) return;
-    const val = editValue.trim();
-    editField = null;
-    editValue = "";
-    try {
-      await updateJobField(cs.vaultPath, slug, field, val);
-      await reload();
-    } catch (e) {
-      alert(`Save failed for ${field}: ${e}`);
+  function splitList(s: string): string[] {
+    return s.split(",").map((x) => x.trim()).filter(Boolean);
+  }
+
+  function sameList(a: string[], b: string[]): boolean {
+    return a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+
+  async function saveDetails() {
+    const j = job;
+    if (!j || !cs.vaultPath) return;
+
+    let anyChanged = false;
+
+    // List fields
+    const reqSkills = splitList(detailDraft.required_skills ?? "");
+    if (!sameList(reqSkills, j.required_skills)) {
+      await setJobListField(cs.vaultPath, slug, "required_skills", reqSkills);
+      anyChanged = true;
     }
-  }
-
-  async function commitEnum(field: string, value: string) {
-    if (!cs.vaultPath) return;
-    editField = null;
-    editValue = "";
-    try {
-      await updateJobField(cs.vaultPath, slug, field, value);
-      await reload();
-    } catch (e) {
-      alert(`Save failed for ${field}: ${e}`);
+    const prefSkills = splitList(detailDraft.preferred_skills ?? "");
+    if (!sameList(prefSkills, j.preferred_skills)) {
+      await setJobListField(cs.vaultPath, slug, "preferred_skills", prefSkills);
+      anyChanged = true;
     }
-  }
 
-  async function commitList(field: string) {
-    if (!cs.vaultPath || editField !== field) return;
-    const values = editValue
-      .split(",")
-      .map((x) => x.trim())
-      .filter(Boolean);
-    editField = null;
-    editValue = "";
-    try {
-      await setJobListField(cs.vaultPath, slug, field, values);
-      await reload();
-    } catch (e) {
-      alert(`Save failed for ${field}: ${e}`);
+    // Scalar / enum fields — compare draft string to current stringified value
+    const scalarComparisons: Array<{ field: string; draft: string; current: string }> = [
+      { field: "comp_low", draft: detailDraft.comp_low ?? "", current: j.comp_low !== null ? String(j.comp_low) : "" },
+      { field: "comp_high", draft: detailDraft.comp_high ?? "", current: j.comp_high !== null ? String(j.comp_high) : "" },
+      { field: "comp_currency", draft: detailDraft.comp_currency ?? "", current: j.comp_currency ?? "" },
+      { field: "comp_period", draft: detailDraft.comp_period ?? "", current: j.comp_period ?? "" },
+      { field: "comp_equity", draft: detailDraft.comp_equity ?? "", current: j.comp_equity ?? "" },
+      { field: "remote", draft: detailDraft.remote ?? "", current: j.remote ?? "" },
+      { field: "yoe_min", draft: detailDraft.yoe_min ?? "", current: j.yoe_min !== null ? String(j.yoe_min) : "" },
+      { field: "employment_type", draft: detailDraft.employment_type ?? "", current: j.employment_type ?? "" },
+      { field: "level", draft: detailDraft.level ?? "", current: j.level ?? "" },
+      { field: "visa_sponsorship", draft: detailDraft.visa_sponsorship ?? "", current: j.visa_sponsorship ?? "" },
+      { field: "relocation", draft: detailDraft.relocation ?? "", current: j.relocation ?? "" },
+      { field: "date_posted", draft: detailDraft.date_posted ?? "", current: j.date_posted ?? "" },
+      { field: "reports_to", draft: detailDraft.reports_to ?? "", current: j.reports_to ?? "" },
+      { field: "team", draft: detailDraft.team ?? "", current: j.team ?? "" },
+      { field: "location_constraints", draft: detailDraft.location_constraints ?? "", current: j.location_constraints ?? "" },
+    ];
+
+    for (const { field, draft, current } of scalarComparisons) {
+      if (draft !== current) {
+        await updateJobField(cs.vaultPath, slug, field, draft);
+        anyChanged = true;
+      }
     }
-  }
 
-  function onKeydown(e: KeyboardEvent, commitFn: () => void) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitFn();
-    } else if (e.key === "Escape") {
-      cancelEdit();
+    editingDetails = false;
+    await reload();
+
+    // Trigger re-score once — only if something changed and the job is already scored.
+    if (anyChanged) {
+      await maybeRescore();
     }
   }
 
   // ---------------------------------------------------------------------------
   // Collapsible sections
   // ---------------------------------------------------------------------------
-  let jdOpen = $state(false);
-  let researchOpen = $state(false);
+  let detailsOpen = $state(true);
+  let researchOpen = $state(true);
   let rawJdOpen = $state(false);
 
   // ---------------------------------------------------------------------------
@@ -250,9 +349,9 @@
           {#if j.location}&nbsp;· {j.location}{/if}
         </p>
 
-        <!-- Chips row: dealbreaker (score 0) + status anomaly -->
+        <!-- Chips row: dealbreaker ([DEALBREAKER] flag in fit flags) + status anomaly -->
         <div class="jobs__chips">
-          {#if j.fit_score === 0}
+          {#if hasDealbreaker(sections?.fitFlags ?? null)}
             <span class="chip danger">dealbreaker</span>
           {/if}
           {#if statusDisplay?.kind === "anomaly"}
@@ -294,6 +393,13 @@
         {/if}
       </div>
     </header>
+
+    <!-- Re-score indicator (shown while a scoring run is in flight after an edit) -->
+    {#if scoringInFlight}
+      <p class="jobs__rescore-indicator">{rescorePhase || "Re-scoring…"}</p>
+    {:else if rescoreNote}
+      <p class="jobs__rescore-note">{rescoreNote}</p>
+    {/if}
 
     <!-- ====================================================================
          FIT BREAKDOWN — sub-scores + fit flags
@@ -355,365 +461,230 @@
     </section>
 
     <!-- ====================================================================
-         STRUCTURED JD FIELDS (collapsible)
+         DETAILS — editable fields + JD structured brief (expanded by default)
          ==================================================================== -->
     <section class="panel jobs__section">
       <div class="panel__head">
         <span>
-          <button class="linkbtn" onclick={() => (jdOpen = !jdOpen)}>
-            {jdOpen ? "hide" : "show"}
+          <button class="linkbtn" onclick={() => (detailsOpen = !detailsOpen)}>
+            {detailsOpen ? "hide" : "show"}
           </button>
-          Structured JD
+          Details
           {#if j.researched.length > 0}
             <span class="sub">{j.researched.length} field{j.researched.length === 1 ? "" : "s"} researched</span>
           {/if}
         </span>
+        {#if detailsOpen}
+          {#if editingDetails}
+            <span>
+              <button class="linkbtn" onclick={cancelDetailEdit}>cancel</button>
+              <button class="btn sm" onclick={saveDetails}>Save</button>
+            </span>
+          {:else}
+            <button class="linkbtn" onclick={openDetailEdit}>edit</button>
+          {/if}
+        {/if}
       </div>
 
-      {#if jdOpen}
+      {#if detailsOpen}
         <div class="panel__body">
-          <dl class="meta-grid">
+          {#if editingDetails}
+            <!-- Edit mode: all fields as inputs/selects -->
+            <dl class="meta-grid">
 
-            <!-- Comp low -->
-            <dt>Comp low</dt>
-            <dd>
-              {#if editField === "comp_low"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("comp_low")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("comp_low"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("comp_low", String(j.comp_low ?? ""))}>
-                  {j.comp_low !== null ? j.comp_low.toLocaleString() : "—"}
-                </button>
-                {#if j.researched.includes("comp_low")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>Comp low</dt>
+              <dd><input type="text" bind:value={detailDraft.comp_low} /></dd>
 
-            <!-- Comp high -->
-            <dt>Comp high</dt>
-            <dd>
-              {#if editField === "comp_high"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("comp_high")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("comp_high"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("comp_high", String(j.comp_high ?? ""))}>
-                  {j.comp_high !== null ? j.comp_high.toLocaleString() : "—"}
-                </button>
-                {#if j.researched.includes("comp_high")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>Comp high</dt>
+              <dd><input type="text" bind:value={detailDraft.comp_high} /></dd>
 
-            <!-- Comp currency -->
-            <dt>Currency</dt>
-            <dd>
-              {#if editField === "comp_currency"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("comp_currency")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("comp_currency"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("comp_currency", j.comp_currency ?? "")}>
-                  {j.comp_currency ?? "—"}
-                </button>
-                {#if j.researched.includes("comp_currency")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>Currency</dt>
+              <dd><input type="text" bind:value={detailDraft.comp_currency} /></dd>
 
-            <!-- Comp period (enum) -->
-            <dt>Comp period</dt>
-            <dd>
-              {#if editField === "comp_period"}
-                <select
-                  bind:value={editValue}
-                  onchange={() => commitEnum("comp_period", editValue)}
-                  onblur={() => commitEnum("comp_period", editValue)}
-                >
+              <dt>Comp period</dt>
+              <dd>
+                <select bind:value={detailDraft.comp_period}>
                   <option value="">—</option>
                   {#each compPeriodOptions as opt (opt.value)}
                     <option value={opt.value}>{opt.label}</option>
                   {/each}
                 </select>
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("comp_period", j.comp_period ?? "")}>
-                  {j.comp_period ? humanize(j.comp_period) : "—"}
-                </button>
-                {#if j.researched.includes("comp_period")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-            <!-- Comp equity -->
-            <dt>Equity</dt>
-            <dd>
-              {#if editField === "comp_equity"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("comp_equity")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("comp_equity"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("comp_equity", j.comp_equity ?? "")}>
-                  {j.comp_equity ?? "—"}
-                </button>
-                {#if j.researched.includes("comp_equity")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>Equity</dt>
+              <dd><input type="text" bind:value={detailDraft.comp_equity} /></dd>
 
-            <!-- Required skills (list) -->
-            <dt>Required skills</dt>
-            <dd>
-              {#if editField === "required_skills"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  placeholder="comma-separated"
-                  onblur={() => commitList("required_skills")}
-                  onkeydown={(e) => onKeydown(e, () => commitList("required_skills"))}
-                />
-              {:else}
-                <button
-                  class="jobs__field-val linkbtn"
-                  onclick={() => startEdit("required_skills", j.required_skills.join(", "))}
-                >
-                  {j.required_skills.length > 0
-                    ? j.required_skills.map((s) => s).join(", ")
-                    : "—"}
-                </button>
-                {#if j.researched.includes("required_skills")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>Required skills</dt>
+              <dd><input type="text" bind:value={detailDraft.required_skills} placeholder="comma-separated" /></dd>
 
-            <!-- Preferred skills (list) -->
-            <dt>Preferred skills</dt>
-            <dd>
-              {#if editField === "preferred_skills"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  placeholder="comma-separated"
-                  onblur={() => commitList("preferred_skills")}
-                  onkeydown={(e) => onKeydown(e, () => commitList("preferred_skills"))}
-                />
-              {:else}
-                <button
-                  class="jobs__field-val linkbtn"
-                  onclick={() => startEdit("preferred_skills", j.preferred_skills.join(", "))}
-                >
-                  {j.preferred_skills.length > 0
-                    ? j.preferred_skills.map((s) => s).join(", ")
-                    : "—"}
-                </button>
-                {#if j.researched.includes("preferred_skills")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>Preferred skills</dt>
+              <dd><input type="text" bind:value={detailDraft.preferred_skills} placeholder="comma-separated" /></dd>
 
-            <!-- Remote (enum) -->
-            <dt>Remote</dt>
-            <dd>
-              {#if editField === "remote"}
-                <select
-                  bind:value={editValue}
-                  onchange={() => commitEnum("remote", editValue)}
-                  onblur={() => commitEnum("remote", editValue)}
-                >
+              <dt>Remote</dt>
+              <dd>
+                <select bind:value={detailDraft.remote}>
                   <option value="">—</option>
                   {#each remoteOptions as opt (opt.value)}
                     <option value={opt.value}>{opt.label}</option>
                   {/each}
                 </select>
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("remote", j.remote ?? "")}>
-                  {j.remote ? humanize(j.remote) : "—"}
-                </button>
-                {#if j.researched.includes("remote")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-            <!-- YOE min -->
-            <dt>YOE min</dt>
-            <dd>
-              {#if editField === "yoe_min"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("yoe_min")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("yoe_min"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("yoe_min", String(j.yoe_min ?? ""))}>
-                  {j.yoe_min !== null ? `${j.yoe_min}+` : "—"}
-                </button>
-                {#if j.researched.includes("yoe_min")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              <dt>YOE min</dt>
+              <dd><input type="text" bind:value={detailDraft.yoe_min} /></dd>
 
-            <!-- Employment type (enum) -->
-            <dt>Employment</dt>
-            <dd>
-              {#if editField === "employment_type"}
-                <select
-                  bind:value={editValue}
-                  onchange={() => commitEnum("employment_type", editValue)}
-                  onblur={() => commitEnum("employment_type", editValue)}
-                >
+              <dt>Employment</dt>
+              <dd>
+                <select bind:value={detailDraft.employment_type}>
                   <option value="">—</option>
                   {#each employmentOptions as opt (opt.value)}
                     <option value={opt.value}>{opt.label}</option>
                   {/each}
                 </select>
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("employment_type", j.employment_type ?? "")}>
-                  {j.employment_type ? humanize(j.employment_type) : "—"}
-                </button>
-                {#if j.researched.includes("employment_type")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-            <!-- Level (enum) -->
-            <dt>Level</dt>
-            <dd>
-              {#if editField === "level"}
-                <select
-                  bind:value={editValue}
-                  onchange={() => commitEnum("level", editValue)}
-                  onblur={() => commitEnum("level", editValue)}
-                >
+              <dt>Level</dt>
+              <dd>
+                <select bind:value={detailDraft.level}>
                   <option value="">—</option>
                   {#each levelOptions as opt (opt.value)}
                     <option value={opt.value}>{opt.label}</option>
                   {/each}
                 </select>
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("level", j.level ?? "")}>
-                  {j.level ? levelLabel(j.level) : "—"}
-                </button>
+              </dd>
+
+              <dt>Visa sponsorship</dt>
+              <dd>
+                <select bind:value={detailDraft.visa_sponsorship}>
+                  <option value="">—</option>
+                  {#each sponsorshipOptions as opt (opt.value)}
+                    <option value={opt.value}>{opt.label}</option>
+                  {/each}
+                </select>
+              </dd>
+
+              <dt>Relocation</dt>
+              <dd>
+                <select bind:value={detailDraft.relocation}>
+                  <option value="">—</option>
+                  {#each sponsorshipOptions as opt (opt.value)}
+                    <option value={opt.value}>{opt.label}</option>
+                  {/each}
+                </select>
+              </dd>
+
+              <dt>Posted</dt>
+              <dd><input type="text" bind:value={detailDraft.date_posted} /></dd>
+
+              <dt>Reports to</dt>
+              <dd><input type="text" bind:value={detailDraft.reports_to} /></dd>
+
+              <dt>Team</dt>
+              <dd><input type="text" bind:value={detailDraft.team} /></dd>
+
+              <dt>Location notes</dt>
+              <dd><input type="text" bind:value={detailDraft.location_constraints} /></dd>
+
+            </dl>
+          {:else}
+            <!-- Read mode -->
+            <dl class="meta-grid">
+
+              <dt>Comp low</dt>
+              <dd>
+                {j.comp_low !== null ? j.comp_low.toLocaleString() : "—"}
+                {#if j.researched.includes("comp_low")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Comp high</dt>
+              <dd>
+                {j.comp_high !== null ? j.comp_high.toLocaleString() : "—"}
+                {#if j.researched.includes("comp_high")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Currency</dt>
+              <dd>
+                {j.comp_currency ?? "—"}
+                {#if j.researched.includes("comp_currency")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Comp period</dt>
+              <dd>
+                {j.comp_period ? humanize(j.comp_period) : "—"}
+                {#if j.researched.includes("comp_period")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Equity</dt>
+              <dd>
+                {j.comp_equity ?? "—"}
+                {#if j.researched.includes("comp_equity")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Required skills</dt>
+              <dd>
+                {j.required_skills.length > 0 ? j.required_skills.join(", ") : "—"}
+                {#if j.researched.includes("required_skills")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Preferred skills</dt>
+              <dd>
+                {j.preferred_skills.length > 0 ? j.preferred_skills.join(", ") : "—"}
+                {#if j.researched.includes("preferred_skills")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Remote</dt>
+              <dd>
+                {j.remote ? humanize(j.remote) : "—"}
+                {#if j.researched.includes("remote")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>YOE min</dt>
+              <dd>
+                {j.yoe_min !== null ? `${j.yoe_min}+` : "—"}
+                {#if j.researched.includes("yoe_min")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Employment</dt>
+              <dd>
+                {j.employment_type ? humanize(j.employment_type) : "—"}
+                {#if j.researched.includes("employment_type")} <span class="jobs__researched">(researched)</span>{/if}
+              </dd>
+
+              <dt>Level</dt>
+              <dd>
+                {j.level ? levelLabel(j.level) : "—"}
                 {#if j.researched.includes("level")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-            <!-- Visa sponsorship (enum) -->
-            <dt>Visa sponsorship</dt>
-            <dd>
-              {#if editField === "visa_sponsorship"}
-                <select
-                  bind:value={editValue}
-                  onchange={() => commitEnum("visa_sponsorship", editValue)}
-                  onblur={() => commitEnum("visa_sponsorship", editValue)}
-                >
-                  <option value="">—</option>
-                  {#each sponsorshipOptions as opt (opt.value)}
-                    <option value={opt.value}>{opt.label}</option>
-                  {/each}
-                </select>
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("visa_sponsorship", j.visa_sponsorship ?? "")}>
-                  {j.visa_sponsorship ? humanize(j.visa_sponsorship) : "—"}
-                </button>
+              <dt>Visa sponsorship</dt>
+              <dd>
+                {j.visa_sponsorship ? humanize(j.visa_sponsorship) : "—"}
                 {#if j.researched.includes("visa_sponsorship")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-            <!-- Relocation (enum) -->
-            <dt>Relocation</dt>
-            <dd>
-              {#if editField === "relocation"}
-                <select
-                  bind:value={editValue}
-                  onchange={() => commitEnum("relocation", editValue)}
-                  onblur={() => commitEnum("relocation", editValue)}
-                >
-                  <option value="">—</option>
-                  {#each sponsorshipOptions as opt (opt.value)}
-                    <option value={opt.value}>{opt.label}</option>
-                  {/each}
-                </select>
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("relocation", j.relocation ?? "")}>
-                  {j.relocation ? humanize(j.relocation) : "—"}
-                </button>
+              <dt>Relocation</dt>
+              <dd>
+                {j.relocation ? humanize(j.relocation) : "—"}
                 {#if j.researched.includes("relocation")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-            <!-- Date posted -->
-            <dt>Posted</dt>
-            <dd>
-              {#if editField === "date_posted"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("date_posted")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("date_posted"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("date_posted", j.date_posted ?? "")}>
-                  {j.date_posted ?? "—"}
-                </button>
-              {/if}
-            </dd>
+              <dt>Posted</dt>
+              <dd>{j.date_posted ?? "—"}</dd>
 
-            <!-- Reports to -->
-            <dt>Reports to</dt>
-            <dd>
-              {#if editField === "reports_to"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("reports_to")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("reports_to"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("reports_to", j.reports_to ?? "")}>
-                  {j.reports_to ?? "—"}
-                </button>
-              {/if}
-            </dd>
+              <dt>Reports to</dt>
+              <dd>{j.reports_to ?? "—"}</dd>
 
-            <!-- Team -->
-            <dt>Team</dt>
-            <dd>
-              {#if editField === "team"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("team")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("team"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("team", j.team ?? "")}>
-                  {j.team ?? "—"}
-                </button>
-              {/if}
-            </dd>
+              <dt>Team</dt>
+              <dd>{j.team ?? "—"}</dd>
 
-            <!-- Location constraints -->
-            <dt>Location notes</dt>
-            <dd>
-              {#if editField === "location_constraints"}
-                <input
-                  type="text"
-                  bind:value={editValue}
-                  onblur={() => commitScalar("location_constraints")}
-                  onkeydown={(e) => onKeydown(e, () => commitScalar("location_constraints"))}
-                />
-              {:else}
-                <button class="jobs__field-val linkbtn" onclick={() => startEdit("location_constraints", j.location_constraints ?? "")}>
-                  {j.location_constraints ?? "—"}
-                </button>
+              <dt>Location notes</dt>
+              <dd>
+                {j.location_constraints ?? "—"}
                 {#if j.researched.includes("location_constraints")} <span class="jobs__researched">(researched)</span>{/if}
-              {/if}
-            </dd>
+              </dd>
 
-          </dl>
+            </dl>
+          {/if}
 
           {#if jdStructuredHtml}
             <div class="jobs__jd-brief">
@@ -758,7 +729,7 @@
     </section>
 
     <!-- ====================================================================
-         RESEARCH NOTES (collapsible)
+         RESEARCH NOTES (expanded by default)
          ==================================================================== -->
     {#if sections?.research}
       <section class="panel jobs__section">
