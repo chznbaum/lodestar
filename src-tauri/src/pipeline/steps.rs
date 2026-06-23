@@ -37,7 +37,9 @@ use crate::llm::Llm;
 use crate::pipeline::filter::{prefilter, RawListing};
 use crate::pipeline::queue::{NewTask, Queue, QueuedTask, MAX_ATTEMPTS, TRANSIENT_SCRAPE_MAX_ATTEMPTS};
 use crate::pipeline::gaps::detect_gaps;
-use crate::pipeline::runner::{now_iso, record_step, record_step_warned, run_scrape_step};
+use crate::pipeline::runner::{
+    now_iso, record_step, run_scrape_step, StepIdentity, StepOutcome,
+};
 use crate::profile::read_target_criteria;
 use crate::prompts::{
     build_alignment_prompt, build_research_gaps_prompt, build_structure_jd_prompt,
@@ -520,6 +522,8 @@ pub fn abort_running_runs(
             finished_at: Some(now_iso()),
             error: Some(reason.to_string()),
             cost: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             warnings: vec![],
         });
         run.errors += 1;
@@ -613,6 +617,8 @@ fn fail_run(
                 finished_at: Some(now_iso()),
                 error: Some(error_msg.to_string()),
                 cost: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
                 warnings: stamp_warning.into_iter().collect(),
             });
         }
@@ -796,7 +802,11 @@ pub fn pump_once<S: Scraper, L: Llm>(
             Ok(scraped) => {
                 let started = now_iso();
                 let sanitized = sanitize(&scraped.content, &p.careers_url);
-                record_step(vault_path, &task.run_id, "sanitize", "script", &task.target, started, "ok", None, None)?;
+                record_step(
+                    vault_path, &task.run_id,
+                    StepIdentity::new("sanitize", "script", &task.target, started),
+                    StepOutcome::ok(None),
+                )?;
 
                 // For jd-scrape: write the raw JD to jobs/_jd/<slug>.md and set jd_raw_file.
                 if task.stage == "jd-scrape" {
@@ -963,18 +973,17 @@ pub fn pump_once<S: Scraper, L: Llm>(
                             // run rather than an eprintln-only silent swallow. The detail run stays
                             // `complete` and the job stays `detailed` — scoring just didn't start.
                             // The user/checks-page sees the warning step and can trigger a re-score.
-                            let _ = record_step_warned(
+                            let _ = record_step(
                                 vault_path,
                                 &task.run_id,
-                                "scoring-handoff",
-                                "script",
-                                &run.subject,
-                                now_iso(),
-                                vec![format!(
-                                    "auto-scoring did not start for {}: {e}",
-                                    run.subject
-                                )],
-                                None,
+                                StepIdentity::new("scoring-handoff", "script", &run.subject, now_iso()),
+                                StepOutcome::warned(
+                                    vec![format!(
+                                        "auto-scoring did not start for {}: {e}",
+                                        run.subject
+                                    )],
+                                    None,
+                                ),
                             );
                         }
                     }
@@ -1014,17 +1023,29 @@ fn dispatch_non_scrape<L: Llm>(
                     let cost = resp.cost_micro_usd;
                     match parse_structured_listings(&resp.content) {
                         Ok(l) => {
-                            record_step(vault_path, run_id, "structure-listings", "llm", company, started, "ok", None, cost)?;
+                            record_step(
+                                vault_path, run_id,
+                                StepIdentity::new("structure-listings", "llm", company, started),
+                                StepOutcome::ok(cost),
+                            )?;
                             l
                         }
                         Err(e) => {
-                            record_step(vault_path, run_id, "structure-listings", "llm", company, started, "failed", Some(e.clone()), cost)?;
+                            record_step(
+                                vault_path, run_id,
+                                StepIdentity::new("structure-listings", "llm", company, started),
+                                StepOutcome::failed(e.clone(), cost),
+                            )?;
                             return Err(StepFailure::Llm(LlmFailure::Parse(e)));
                         }
                     }
                 }
                 Err(e) => {
-                    record_step(vault_path, run_id, "structure-listings", "llm", company, started, "failed", Some(e.clone()), None)?;
+                    record_step(
+                        vault_path, run_id,
+                        StepIdentity::new("structure-listings", "llm", company, started),
+                        StepOutcome::failed(e.clone(), None),
+                    )?;
                     return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
             };
@@ -1061,7 +1082,11 @@ fn dispatch_non_scrape<L: Llm>(
                 .iter()
                 .filter(|l| l.url.as_deref().map(|u| kept_urls.contains(u)).unwrap_or(false))
                 .collect();
-            record_step(vault_path, run_id, "pre-filter", "script", company, started, "ok", None, None)?;
+            record_step(
+                vault_path, run_id,
+                StepIdentity::new("pre-filter", "script", company, started),
+                StepOutcome::ok(None),
+            )?;
 
             // Track stub writes: a failed write is surfaced as a visible warning (never eprintln-
             // only), and roles_found counts what was actually written.
@@ -1131,9 +1156,10 @@ fn dispatch_non_scrape<L: Llm>(
             }
             // Surface skipped stubs and/or a stamp failure as a visible "finalize" warning step.
             if !stub_warnings.is_empty() {
-                record_step_warned(
-                    vault_path, run_id, "finalize", "script", company, finalize_started,
-                    stub_warnings, None,
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("finalize", "script", company, finalize_started),
+                    StepOutcome::warned(stub_warnings, None),
                 )?;
             }
             Ok(vec![])
@@ -1148,12 +1174,20 @@ fn dispatch_non_scrape<L: Llm>(
                 Ok(r) => match parse_structured_jd(&r.content) {
                     Ok(jd) => (jd, r.cost_micro_usd),
                     Err(e) => {
-                        record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "failed", Some(e.clone()), r.cost_micro_usd)?;
+                        record_step(
+                            vault_path, run_id,
+                            StepIdentity::new("structure-jd", "llm", &p.slug, started),
+                            StepOutcome::failed(e.clone(), r.cost_micro_usd),
+                        )?;
                         return Err(StepFailure::Llm(LlmFailure::Parse(e)));
                     }
                 },
                 Err(e) => {
-                    record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "failed", Some(e.clone()), None)?;
+                    record_step(
+                        vault_path, run_id,
+                        StepIdentity::new("structure-jd", "llm", &p.slug, started),
+                        StepOutcome::failed(e.clone(), None),
+                    )?;
                     return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
             };
@@ -1161,9 +1195,17 @@ fn dispatch_non_scrape<L: Llm>(
             // Advance status to "detailed" now that the JD has been structured and written.
             advance_job_status(vault_path, &p.slug, "detailed")?;
             if warnings.is_empty() {
-                record_step(vault_path, run_id, "structure-jd", "llm", &p.slug, started, "ok", None, cost)?;
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("structure-jd", "llm", &p.slug, started),
+                    StepOutcome::ok(cost),
+                )?;
             } else {
-                record_step_warned(vault_path, run_id, "structure-jd", "llm", &p.slug, started, warnings, cost)?;
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("structure-jd", "llm", &p.slug, started),
+                    StepOutcome::warned(warnings, cost),
+                )?;
             }
             Ok(vec![NewTask {
                 run_id: run_id.into(),
@@ -1181,7 +1223,11 @@ fn dispatch_non_scrape<L: Llm>(
                 .map_err(|e| format!("read {path:?}: {e}"))?;
             let job = parse_job(slug, &text)?;
             let gaps = detect_gaps(&job);
-            record_step(vault_path, run_id, "gap-detect", "script", slug, started, "ok", None, None)?;
+            record_step(
+                vault_path, run_id,
+                StepIdentity::new("gap-detect", "script", slug, started),
+                StepOutcome::ok(None),
+            )?;
             if gaps.is_empty() {
                 // No gaps to research → this is the detail run's terminal. Close the detail run
                 // `complete`; the handoff to a `job_scoring` run happens at the pump_once seam.
@@ -1227,8 +1273,9 @@ fn dispatch_non_scrape<L: Llm>(
                 Ok(r) => r,
                 Err(e) => {
                     record_step(
-                        vault_path, run_id, "research-gaps", "llm", slug, started,
-                        "failed", Some(e.clone()), None,
+                        vault_path, run_id,
+                        StepIdentity::new("research-gaps", "llm", slug, started),
+                        StepOutcome::failed(e.clone(), None),
                     )?;
                     return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
@@ -1240,8 +1287,9 @@ fn dispatch_non_scrape<L: Llm>(
                 Err(e) => {
                     // Total parse failure (not JSON / not an array) — hard failure, record cost.
                     record_step(
-                        vault_path, run_id, "research-gaps", "llm", slug, started,
-                        "failed", Some(e.clone()), cost,
+                        vault_path, run_id,
+                        StepIdentity::new("research-gaps", "llm", slug, started),
+                        StepOutcome::failed(e.clone(), cost),
                     )?;
                     return Err(StepFailure::Llm(LlmFailure::Parse(e)));
                 }
@@ -1279,8 +1327,9 @@ fn dispatch_non_scrape<L: Llm>(
                         ),
                     };
                     record_step(
-                        vault_path, run_id, "research-gaps", "llm", slug, started,
-                        "failed", Some(msg.clone()), cost,
+                        vault_path, run_id,
+                        StepIdentity::new("research-gaps", "llm", slug, started),
+                        StepOutcome::failed(msg.clone(), cost),
                     )?;
                     return Err(StepFailure::Llm(LlmFailure::Write(msg)));
                 }
@@ -1340,15 +1389,19 @@ fn dispatch_non_scrape<L: Llm>(
             // Telemetry.
             if rejections.is_empty() {
                 record_step(
-                    vault_path, run_id, "research-gaps", "llm", slug, started, "ok", None, cost,
+                    vault_path, run_id,
+                    StepIdentity::new("research-gaps", "llm", slug, started),
+                    StepOutcome::ok(cost),
                 )?;
             } else {
                 let warnings: Vec<String> = rejections
                     .iter()
                     .map(|r| format!("{}: {}", r.field, r.reason))
                     .collect();
-                record_step_warned(
-                    vault_path, run_id, "research-gaps", "llm", slug, started, warnings, cost,
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("research-gaps", "llm", slug, started),
+                    StepOutcome::warned(warnings, cost),
                 )?;
             }
 
@@ -1455,7 +1508,11 @@ fn dispatch_non_scrape<L: Llm>(
             // Advance status to "scored" now that a fit score has been computed and written.
             advance_job_status(vault_path, slug, "scored")?;
             // Deterministic — no spend, so no cost recorded.
-            record_step(vault_path, run_id, "fit-score", "script", slug, started, "ok", None, None)?;
+            record_step(
+                vault_path, run_id,
+                StepIdentity::new("fit-score", "script", slug, started),
+                StepOutcome::ok(None),
+            )?;
 
             Ok(vec![NewTask {
                 run_id: run_id.into(),
@@ -1558,20 +1615,45 @@ fn dispatch_non_scrape<L: Llm>(
             let resp = match llm.complete(&prompt) {
                 Ok(r) => r,
                 Err(e) => {
-                    record_step(vault_path, run_id, "alignment", "llm", slug, started, "failed", Some(e.clone()), None)?;
+                    // Call failure: no response exists, so no cache telemetry — a plain
+                    // `StepOutcome::failed` honestly records None for the cache fields.
+                    record_step(
+                        vault_path, run_id,
+                        StepIdentity::new("alignment", "llm", slug, started),
+                        StepOutcome::failed(e.clone(), None),
+                    )?;
                     return Err(StepFailure::Llm(LlmFailure::Call(e)));
                 }
             };
+            // Cache telemetry is observability only — `cost` already nets the cache discount. The
+            // alignment prompt is the only step that sets `cached_prefix`, so it's the only step
+            // that records non-None cache tokens (via the llm recording path).
             let cost = resp.cost_micro_usd;
+            let cache_read = resp.cache_read_tokens;
+            let cache_write = resp.cache_write_tokens;
             let md = clean_alignment(&resp.content);
             if let Err(e) = set_job_section(vault_path, slug, "## Alignment analysis", &md) {
-                record_step(vault_path, run_id, "alignment", "llm", slug, started, "failed", Some(e.clone()), cost)?;
+                // Write failure: the LLM response existed, so its cache telemetry is real — carry it
+                // through so a cached run that fails on disk still shows the cache engaged.
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("alignment", "llm", slug, started),
+                    StepOutcome::failed(e.clone(), cost).with_cache(cache_read, cache_write),
+                )?;
                 return Err(StepFailure::Llm(LlmFailure::Write(e)));
             }
             if warnings.is_empty() {
-                record_step(vault_path, run_id, "alignment", "llm", slug, started, "ok", None, cost)?;
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("alignment", "llm", slug, started),
+                    StepOutcome::ok(cost).with_cache(cache_read, cache_write),
+                )?;
             } else {
-                record_step_warned(vault_path, run_id, "alignment", "llm", slug, started, warnings, cost)?;
+                record_step(
+                    vault_path, run_id,
+                    StepIdentity::new("alignment", "llm", slug, started),
+                    StepOutcome::warned(warnings, cost).with_cache(cache_read, cache_write),
+                )?;
             }
 
             // Close the scoring run complete (mirror finalize). A job_detail/job_scoring run NEVER
@@ -3339,6 +3421,53 @@ mod tests {
             !run.steps.iter().any(|s| s.stage == "jd-scrape" || s.stage == "structure-jd"),
             "a scoring run must NOT record any scrape/structure-jd step; steps: {:?}", run.steps
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The alignment arm must persist the cache read/write token counts from the `LlmResponse`
+    /// onto the recorded `alignment` step (Task 2a observability). Uses a fake LLM that reports
+    /// cache activity on the alignment branch; the persisted step must carry those counts.
+    #[test]
+    fn alignment_step_persists_cache_tokens() {
+        // Alignment-branch LLM that reports cache reads/writes (mirrors StageScriptedLlm's
+        // request keying, but with non-None cache telemetry).
+        struct CacheReportingLlm;
+        impl Llm for CacheReportingLlm {
+            fn complete(&self, req: &LlmRequest) -> Result<LlmResponse, String> {
+                if req.user.contains("## Fit breakdown") {
+                    Ok(LlmResponse {
+                        content: "## Alignment analysis\n\nStrong fit. Worth pursuing.".into(),
+                        cost_micro_usd: Some(4_200),
+                        cache_read_tokens: Some(6_600),
+                        cache_write_tokens: Some(7_000),
+                    })
+                } else {
+                    Ok(LlmResponse { content: "[]".into(), cost_micro_usd: Some(0), cache_read_tokens: None, cache_write_tokens: None })
+                }
+            }
+        }
+
+        let dir = scorable_job_fixture("detailed");
+        let vault = dir.to_str().unwrap();
+        let q = SqliteQueue::open(&dir.join("queue.db")).unwrap();
+        let run_id = start_rescore_run(&q, vault, "senior-engineer-acme", "2026-06-23").unwrap();
+
+        struct PanicScraper;
+        impl Scraper for PanicScraper {
+            fn fetch(&self, _u: &str, _t: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
+                panic!("a scoring run must never scrape");
+            }
+        }
+        let llm = CacheReportingLlm;
+        let cfg = default_config();
+        while pump_once(&q, vault, &cfg, &PanicScraper, &llm, &NoopSink, &|_| false).unwrap() {}
+
+        let run = get_check(vault.to_string(), run_id).unwrap();
+        let align = run.steps.iter().find(|s| s.stage == "alignment")
+            .expect("alignment step recorded");
+        assert_eq!(align.status, "ok");
+        assert_eq!(align.cache_read_tokens, Some(6_600), "alignment step must carry the response's cache reads");
+        assert_eq!(align.cache_write_tokens, Some(7_000), "alignment step must carry the response's cache writes");
         std::fs::remove_dir_all(&dir).ok();
     }
 

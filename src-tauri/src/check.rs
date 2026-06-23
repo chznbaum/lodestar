@@ -24,6 +24,16 @@ pub struct Step {
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<i64>,
+    /// Cache **read** tokens for an llm step — from `LlmResponse.cache_read_tokens` (OpenRouter's
+    /// `usage.prompt_tokens_details.cached_tokens`). `> 0` proves the cached prefix was served from
+    /// cache. Observability only (`cost` already nets the discount). `None` for non-llm steps and
+    /// for llm steps that don't cache; not emitted when absent (mirrors `cost`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<i64>,
+    /// Cache **write** tokens for an llm step — from `LlmResponse.cache_write_tokens`. `> 0` on the
+    /// first call / each 1h re-warm. `None` when there was no cache activity; not emitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<i64>,
     /// Recorded issues when status is `"warning"`: core work succeeded but with noted problems.
     /// Empty on ok/failed steps; not emitted when empty (skip_serializing_if).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -292,6 +302,8 @@ mod tests {
             finished_at: None,
             error: None,
             cost: Some(5),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             warnings: vec![],
         };
         let updated = append_step(&vault, "2026-06-17-0001", step).unwrap();
@@ -308,9 +320,9 @@ mod tests {
     fn summary_tallies_credits_and_usd_by_class() {
         let mut c = empty_run("2026-06-18-0001");
         c.steps = vec![
-            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(25), warnings: vec![] },
-            Step { stage: "structure-listings".into(), class: "llm".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(500_000), warnings: vec![] }, // $0.50 in micro-dollars
-            Step { stage: "pre-filter".into(), class: "script".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, warnings: vec![] },
+            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(25), cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
+            Step { stage: "structure-listings".into(), class: "llm".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(500_000), cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] }, // $0.50 in micro-dollars
+            Step { stage: "pre-filter".into(), class: "script".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
         ];
         let s = CheckSummary::from(&c);
         assert_eq!(s.credits, 25); // scrape steps only
@@ -329,8 +341,8 @@ mod tests {
         newer.started_at = Some("2026-06-17T09:00:00".into());
         newer.roles_found = 3;
         newer.steps = vec![
-            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "stripe".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, warnings: vec![] },
-            Step { stage: "jd-scrape".into(), class: "scrape".into(), target: "x".into(), status: "failed".into(), attempts: 2, started_at: None, finished_at: None, error: Some("timeout".into()), cost: None, warnings: vec![] },
+            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "stripe".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
+            Step { stage: "jd-scrape".into(), class: "scrape".into(), target: "x".into(), status: "failed".into(), attempts: 2, started_at: None, finished_at: None, error: Some("timeout".into()), cost: None, cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
         ];
         write_check(&vault, &older).unwrap();
         write_check(&vault, &newer).unwrap();
@@ -365,6 +377,8 @@ mod tests {
             finished_at: None,
             error: None,
             cost: Some(1_000),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             warnings: vec![
                 "rejected countries: expected array, got string".into(),
                 "missing equity field".into(),
@@ -398,6 +412,8 @@ mod tests {
             finished_at: None,
             error: None,
             cost: Some(5),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
             warnings: vec![],
         }];
         let rendered = render_check_note(&c);
@@ -405,6 +421,72 @@ mod tests {
             !rendered.contains("warnings:"),
             "ok step must not emit warnings key; got:\n{rendered}"
         );
+    }
+
+    // ── Cache-token tests (Task 2a, TDD RED → GREEN) ─────────────────────────
+
+    #[test]
+    fn step_with_cache_tokens_round_trips() {
+        // An alignment step carrying cache read/write counts must survive
+        // render_check_note → parse_check intact.
+        let mut c = empty_run("2026-06-23-cache");
+        c.steps = vec![Step {
+            stage: "alignment".into(),
+            class: "llm".into(),
+            target: "stripe".into(),
+            status: "ok".into(),
+            attempts: 1,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            cost: Some(4_200),
+            cache_read_tokens: Some(6_600),
+            cache_write_tokens: Some(7_000),
+            warnings: vec![],
+        }];
+        let rendered = render_check_note(&c);
+        let parsed = parse_check("2026-06-23-cache", &rendered).unwrap();
+        assert_eq!(parsed.steps.len(), 1);
+        assert_eq!(parsed.steps[0].cache_read_tokens, Some(6_600));
+        assert_eq!(parsed.steps[0].cache_write_tokens, Some(7_000));
+    }
+
+    #[test]
+    fn step_without_cache_tokens_emits_no_keys() {
+        // A step with no cache activity must NOT emit cache_read_tokens/cache_write_tokens
+        // keys (skip_serializing_if = "Option::is_none", mirroring `cost`).
+        let mut c = empty_run("2026-06-23-no-cache");
+        c.steps = vec![Step {
+            stage: "careers-scrape".into(),
+            class: "scrape".into(),
+            target: "stripe".into(),
+            status: "ok".into(),
+            attempts: 1,
+            started_at: None,
+            finished_at: None,
+            error: None,
+            cost: Some(5),
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            warnings: vec![],
+        }];
+        let rendered = render_check_note(&c);
+        assert!(
+            !rendered.contains("cache_read_tokens:") && !rendered.contains("cache_write_tokens:"),
+            "None cache fields must not emit keys; got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn old_step_without_cache_keys_parses_with_none() {
+        // A note serialized before the cache fields existed must still parse cleanly,
+        // defaulting both to None (no migration). Exercises #[serde(default)] on the new fields.
+        let c = parse_check("2026-06-17-0001", RUN).unwrap();
+        assert_eq!(c.steps.len(), 2);
+        assert!(c.steps[0].cache_read_tokens.is_none());
+        assert!(c.steps[0].cache_write_tokens.is_none());
+        assert!(c.steps[1].cache_read_tokens.is_none());
+        assert!(c.steps[1].cache_write_tokens.is_none());
     }
 
     #[test]
