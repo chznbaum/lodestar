@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar — warm + serif theme options (v2)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Hanken+Grotesk:wght@400;500;600;700&family=Zilla+Slab:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=Lora:wght@400;500;600&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9e9ea;color:#1a1a1a;font-family:-apple-system,system-ui,sans-serif;line-height:1.5;padding:2rem 1.25rem 5rem}
+  .wrap{max-width:1060px;margin:0 auto}
+  h1{font-size:1.5rem;margin:0 0 .2rem}
+  .lede{color:#555;max-width:76ch;margin:.2rem 0 1.25rem}
+  .lede code{background:#dcdcde;padding:.05rem .3rem;border-radius:4px}
+
+  /* global color-role legend */
+  .roles{display:flex;gap:1rem;flex-wrap:wrap;background:#fff;border:1px solid #d6d6d8;border-radius:10px;padding:.7rem .9rem;margin-bottom:1.75rem;font-size:.8rem}
+  .roles div{display:flex;align-items:center;gap:.4rem}
+  .roles i{width:.95rem;height:.95rem;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.1)}
+  .roles b{font-weight:600}
+
+  .opt{margin-bottom:2.25rem;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.08);border:1px solid #d4d4d6}
+  .opt-head{padding:.75rem 1rem;background:#fff;border-bottom:1px solid #e5e5e7}
+  .opt-head .tag{font-weight:700;background:#1a1a1a;color:#fff;border-radius:99px;padding:.15rem .6rem;font-size:.72rem;margin-right:.5rem}
+  .opt-head .name{font-weight:600}
+  .opt-head .type{color:#555;font-size:.82rem;margin-top:.3rem}
+  .opt-head .type b{color:#222}
+  .legend{display:flex;gap:.45rem;flex-wrap:wrap;padding:.5rem 1rem;background:#fafafa;border-bottom:1px solid #eee}
+  .sw{display:flex;align-items:center;gap:.3rem;font-size:.66rem;color:#555;font-family:ui-monospace,monospace}
+  .sw i{width:.85rem;height:.85rem;border-radius:3px;border:1px solid rgba(0,0,0,.12)}
+
+  /* ============ real Heroicons via CSS mask (recolorable) ============ */
+  .ico{display:inline-block;width:18px;height:18px;background-color:currentColor;flex:none;
+    -webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}
+  .ico.sm{width:15px;height:15px}
+  .i-today{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/home.svg')}
+  .i-triage{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/inbox-stack.svg')}
+  .i-pipeline{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/squares-2x2.svg')}
+  .i-companies{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/building-office-2.svg')}
+  .i-network{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/user-group.svg')}
+  .i-patterns{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/chart-bar.svg')}
+  .i-checks{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/cog-6-tooth.svg')}
+  .i-search{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/magnifying-glass.svg')}
+  .i-fetch{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/arrow-path.svg')}
+  .i-add{--i:url('https://cdn.jsdelivr.net/npm/heroicons@2.1.5/24/outline/plus.svg')}
+
+  /* ============ shared slice layout — FIXED sizing; only color + 3 font vars vary per option ============ */
+  .app{display:grid;grid-template-columns:9.5rem 1fr;min-height:22rem;font-family:var(--ui)}
+  .rail{background:var(--rail);color:var(--rail-ink);padding:.6rem .5rem;font-size:.82rem}
+  .brand{color:#fff;font-weight:700;padding:.3rem .55rem .7rem;font-family:var(--display);font-size:1.05rem;display:flex;align-items:center;gap:.45rem}
+  .nav a{display:flex;align-items:center;gap:.5rem;padding:.34rem .55rem;border-radius:7px;color:var(--rail-ink);text-decoration:none;margin-bottom:.08rem;font-size:.82rem}
+  .nav a.on{background:var(--rail-active);color:#fff}
+  .nav a.future{color:var(--rail-muted)}
+  .rsep{height:1px;background:var(--rail-sep);margin:.5rem .4rem}
+  .util{font-size:.66rem;text-transform:uppercase;letter-spacing:.07em;color:var(--rail-muted);padding:.3rem .55rem .15rem}
+
+  .content{background:var(--card);padding:.9rem 1.1rem}
+  .mhead{display:flex;align-items:center;gap:.55rem;margin-bottom:.6rem}
+  .mhead h2{font-family:var(--display);font-size:1.2rem;margin:0;color:var(--ink);font-weight:600}
+  .mhead .count{color:var(--faint);font-size:.85rem;font-family:var(--ui)}
+  .search{flex:1;display:flex;align-items:center;gap:.4rem;border:1px solid var(--wire);border-radius:8px;padding:.32rem .6rem;color:var(--faint);font-size:.82rem;background:var(--card)}
+  .btn{display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--wire);border-radius:8px;padding:.3rem .6rem;background:var(--card);color:var(--ink);font-family:var(--ui);font-size:.8rem;cursor:pointer}
+  .btn.ghost{border-style:dashed;color:var(--muted)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.sm{padding:.2rem .5rem;font-size:.72rem}
+  .tabs{display:flex;gap:.3rem;border-bottom:1px solid var(--line);margin-bottom:.55rem}
+  .tab{font-size:.82rem;padding:.32rem .55rem;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .tab .c{font-size:.72rem;color:var(--faint)}
+  .secthdr{display:flex;align-items:center;gap:.5rem;padding:.4rem .1rem;color:var(--ink-soft);font-weight:600;font-size:.82rem}
+  .badge{background:var(--flat-soft);border-radius:99px;padding:0 .45rem;font-size:.7rem;color:var(--muted);font-weight:600}
+  .grow{flex:1}
+  .qrow{display:grid;grid-template-columns:1.6rem 1fr auto auto;gap:.55rem;align-items:center;padding:.5rem .1rem;border-bottom:1px solid var(--line)}
+  .mono{width:1.6rem;height:1.6rem;border-radius:6px;background:var(--mono-bg);display:grid;place-items:center;font-size:.62rem;font-weight:700;color:var(--mono-ink);font-family:var(--ui)}
+  .nm{font-family:var(--body);font-weight:600;color:var(--ink);font-size:.92rem}
+  .meta{color:var(--muted);font-size:.74rem}
+  .chip{font-size:.66rem;border-radius:99px;padding:.06rem .42rem;background:var(--flat-soft);color:var(--muted);margin-left:.35rem}
+  .chip.good{background:var(--good-soft);color:var(--good)}
+  .chip.warn{background:var(--warn-soft);color:var(--warn)}
+  .chip.danger{background:var(--danger-soft);color:var(--danger)}
+  .sub{color:var(--faint);font-size:.72rem}
+  .panel{border:1px solid var(--line);border-radius:10px;margin-top:.7rem;overflow:hidden}
+  .ph{padding:.42rem .65rem;background:var(--panel-head);border-bottom:1px solid var(--line);font-weight:600;font-size:.78rem;color:var(--ink);font-family:var(--ui)}
+  .pb{padding:.55rem .7rem;color:var(--ink-soft);font-size:.86rem;font-family:var(--body)}
+  .states{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.7rem;font-size:.74rem;color:var(--muted)}
+  .states .chip{margin-left:0}
+
+  /* ===== Option A — Editorial (Fraunces / Newsreader / Hanken Grotesk) ===== */
+  .opt-a{--display:'Fraunces',serif;--body:'Newsreader',serif;--ui:'Hanken Grotesk',sans-serif;
+    --bg:#f6f1e9;--card:#fffdf8;--rail:#2b2521;--rail-ink:#bcae9a;--rail-active:#43392f;--rail-muted:#7d7060;--rail-sep:#3d352d;
+    --ink:#2a2521;--ink-soft:#4a4239;--muted:#6f6555;--faint:#a89c89;--line:#e9dfce;--wire:#d9cdb8;
+    --accent:#b14d2e;--accent-soft:#f4e1d6;--good:#4f6b39;--good-soft:#e6ecd9;--warn:#9a6b16;--warn-soft:#f5ead0;--danger:#a23a2c;--danger-soft:#f4ddd7;
+    --flat-soft:#efe7d8;--panel-head:#f7f0e4;--mono-bg:#e7dcca;--mono-ink:#7d7060}
+  /* ===== Option B — Modern slab (Zilla Slab / IBM Plex Sans / IBM Plex Sans) ===== */
+  .opt-b{--display:'Zilla Slab',serif;--body:'IBM Plex Sans',sans-serif;--ui:'IBM Plex Sans',sans-serif;
+    --bg:#f3eee4;--card:#fffefa;--rail:#322a22;--rail-ink:#b8aa92;--rail-active:#483b2e;--rail-muted:#7b6e5c;--rail-sep:#43382c;
+    --ink:#322b24;--ink-soft:#544a3d;--muted:#74695a;--faint:#a89b88;--line:#e7ddcc;--wire:#d6cab4;
+    --accent:#c2671d;--accent-soft:#f6e6cf;--good:#5a6b34;--good-soft:#e9edd7;--warn:#9c6a17;--warn-soft:#f5e8cf;--danger:#a8442a;--danger-soft:#f5ddd5;
+    --flat-soft:#efe6d6;--panel-head:#f6efe2;--mono-bg:#e7dbc6;--mono-ink:#7b6e5c}
+  /* ===== Option C — Classic (Playfair Display / Lora / Work Sans) ===== */
+  .opt-c{--display:'Playfair Display',serif;--body:'Lora',serif;--ui:'Work Sans',sans-serif;
+    --bg:#f4f0ea;--card:#fffdfa;--rail:#2a221f;--rail-ink:#b6a799;--rail-active:#403330;--rail-muted:#796a60;--rail-sep:#3a302c;
+    --ink:#271f1c;--ink-soft:#4a3e38;--muted:#6e6258;--faint:#a59889;--line:#e6dccf;--wire:#d6c9ba;
+    --accent:#8c3b46;--accent-soft:#f3e0e2;--good:#4f6b3a;--good-soft:#e6ecda;--warn:#9a6b1c;--warn-soft:#f4e9d2;--danger:#9a3326;--danger-soft:#f2dad5;
+    --flat-soft:#eee6da;--panel-head:#f5eee4;--mono-bg:#e6d8cc;--mono-ink:#796a60}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Warm + serif — three directions (v2)</h1>
+  <p class="lede">Same Companies slice, three themes. <b>Sizing is identical across all three</b> (icons 18px, one type scale, one button padding) so only palette + type differ. Each uses a <b>3-tier type system</b>: an ornamental-but-readable <b>display</b> (headings + company names), a legibility-first <b>body</b> (notes/prose), and a clean <b>sans for UI</b> (buttons, tabs, meta — must stay readable small). Nav uses <b>real Heroicons</b> (CSS-masked from the CDN). All fonts are free/OFL.</p>
+
+  <div class="roles">
+    <b>Color roles:</b>
+    <div><i style="background:#b14d2e"></i> <b>Accent</b> — primary actions &amp; active nav</div>
+    <div><i style="background:#4f6b39"></i> <b>Good (green)</b> — screening-clear / success</div>
+    <div><i style="background:#9a6b16"></i> <b>Warn (amber)</b> — caution / due-soon</div>
+    <div><i style="background:#a23a2c"></i> <b>Danger (red)</b> — dealbreaker / destructive</div>
+    <span class="sub" style="flex-basis:100%">(the green you saw in the tokens is the <b>good</b> state — it appears on the "no flags" chip below, NOT a second accent.)</span>
+  </div>
+
+  <!-- ============ OPTION A ============ -->
+  <section class="opt opt-a">
+    <div class="opt-head">
+      <div><span class="tag">A</span><span class="name">Editorial</span></div>
+      <div class="type">Display <b>Fraunces</b> (soft, contemporary serif) · Body <b>Newsreader</b> (warm literary serif) · UI <b>Hanken Grotesk</b> (humanist sans) · paper + terracotta</div>
+    </div>
+    <div class="legend">
+      <span class="sw"><i style="background:#f6f1e9"></i>#f6f1e9 bg</span><span class="sw"><i style="background:#fffdf8"></i>#fffdf8 card</span><span class="sw"><i style="background:#2b2521"></i>#2b2521 rail</span><span class="sw"><i style="background:#b14d2e"></i>#b14d2e accent</span><span class="sw"><i style="background:#2a2521"></i>#2a2521 ink</span>
+    </div>
+    <div class="app">
+      <nav class="rail">
+        <div class="brand">✦ Lodestar</div>
+        <a class="future"><span class="ico i-today"></span> Today</a>
+        <a class="future"><span class="ico i-triage"></span> Triage</a>
+        <a class="future"><span class="ico i-pipeline"></span> Pipeline</a>
+        <a class="on"><span class="ico i-companies"></span> Companies</a>
+        <a class="future"><span class="ico i-network"></span> Network</a>
+        <a class="future"><span class="ico i-patterns"></span> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><span class="ico i-checks"></span> Checks</a>
+      </nav>
+      <div class="content">
+        <div class="mhead"><h2>Companies <span class="count">179</span></h2><span class="search"><span class="ico sm i-search"></span> Search…</span><span class="btn ghost"><span class="ico sm i-add"></span> Add company</span></div>
+        <div class="tabs"><span class="tab on">Queue <span class="c">179 due</span></span><span class="tab">All</span><span class="tab">By domain</span><span class="tab">Best prospects</span></div>
+        <div class="secthdr">Never fetched <span class="badge">179</span><span class="grow"></span><span class="btn primary sm"><span class="ico sm i-fetch"></span> Fetch all due</span></div>
+        <div class="qrow"><span class="mono">St</span><div><div class="nm">Stripe</div><div class="meta">Financial Services · Enterprise · Remote-first</div></div><span class="sub">never checked</span><span class="btn primary sm">Fetch jobs →</span></div>
+        <div class="qrow"><span class="mono">1P</span><div><div class="nm">1Password <span class="chip">B2B</span></div><div class="meta">Security · Scaleup · Remote-first</div></div><span class="sub">never checked</span><span class="btn primary sm">Fetch jobs →</span></div>
+        <div class="panel"><div class="ph">Notes — rendered markdown</div><div class="pb">Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure, top-of-market comp.</div></div>
+        <div class="states">States: <span class="chip good">no flags</span><span class="chip warn">caution</span><span class="chip danger">dealbreaker</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OPTION B ============ -->
+  <section class="opt opt-b">
+    <div class="opt-head">
+      <div><span class="tag">B</span><span class="name">Modern slab</span></div>
+      <div class="type">Display <b>Zilla Slab</b> (sturdy slab serif) · Body <b>IBM Plex Sans</b> (clean, max-legibility) · UI <b>IBM Plex Sans</b> · sand + amber. Serif headline, sans everywhere else — most utilitarian.</div>
+    </div>
+    <div class="legend">
+      <span class="sw"><i style="background:#f3eee4"></i>#f3eee4 bg</span><span class="sw"><i style="background:#fffefa"></i>#fffefa card</span><span class="sw"><i style="background:#322a22"></i>#322a22 rail</span><span class="sw"><i style="background:#c2671d"></i>#c2671d accent</span><span class="sw"><i style="background:#322b24"></i>#322b24 ink</span>
+    </div>
+    <div class="app">
+      <nav class="rail">
+        <div class="brand">✦ Lodestar</div>
+        <a class="future"><span class="ico i-today"></span> Today</a>
+        <a class="future"><span class="ico i-triage"></span> Triage</a>
+        <a class="future"><span class="ico i-pipeline"></span> Pipeline</a>
+        <a class="on"><span class="ico i-companies"></span> Companies</a>
+        <a class="future"><span class="ico i-network"></span> Network</a>
+        <a class="future"><span class="ico i-patterns"></span> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><span class="ico i-checks"></span> Checks</a>
+      </nav>
+      <div class="content">
+        <div class="mhead"><h2>Companies <span class="count">179</span></h2><span class="search"><span class="ico sm i-search"></span> Search…</span><span class="btn ghost"><span class="ico sm i-add"></span> Add company</span></div>
+        <div class="tabs"><span class="tab on">Queue <span class="c">179 due</span></span><span class="tab">All</span><span class="tab">By domain</span><span class="tab">Best prospects</span></div>
+        <div class="secthdr">Never fetched <span class="badge">179</span><span class="grow"></span><span class="btn primary sm"><span class="ico sm i-fetch"></span> Fetch all due</span></div>
+        <div class="qrow"><span class="mono">St</span><div><div class="nm">Stripe</div><div class="meta">Financial Services · Enterprise · Remote-first</div></div><span class="sub">never checked</span><span class="btn primary sm">Fetch jobs →</span></div>
+        <div class="qrow"><span class="mono">1P</span><div><div class="nm">1Password <span class="chip">B2B</span></div><div class="meta">Security · Scaleup · Remote-first</div></div><span class="sub">never checked</span><span class="btn primary sm">Fetch jobs →</span></div>
+        <div class="panel"><div class="ph">Notes — rendered markdown</div><div class="pb">Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure, top-of-market comp.</div></div>
+        <div class="states">States: <span class="chip good">no flags</span><span class="chip warn">caution</span><span class="chip danger">dealbreaker</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OPTION C ============ -->
+  <section class="opt opt-c">
+    <div class="opt-head">
+      <div><span class="tag">C</span><span class="name">Classic</span></div>
+      <div class="type">Display <b>Playfair Display</b> (high-contrast, elegant) · Body <b>Lora</b> (warm, comfortable serif) · UI <b>Work Sans</b> (clean sans) · linen + garnet. Most formal/classical.</div>
+    </div>
+    <div class="legend">
+      <span class="sw"><i style="background:#f4f0ea"></i>#f4f0ea bg</span><span class="sw"><i style="background:#fffdfa"></i>#fffdfa card</span><span class="sw"><i style="background:#2a221f"></i>#2a221f rail</span><span class="sw"><i style="background:#8c3b46"></i>#8c3b46 accent</span><span class="sw"><i style="background:#271f1c"></i>#271f1c ink</span>
+    </div>
+    <div class="app">
+      <nav class="rail">
+        <div class="brand">✦ Lodestar</div>
+        <a class="future"><span class="ico i-today"></span> Today</a>
+        <a class="future"><span class="ico i-triage"></span> Triage</a>
+        <a class="future"><span class="ico i-pipeline"></span> Pipeline</a>
+        <a class="on"><span class="ico i-companies"></span> Companies</a>
+        <a class="future"><span class="ico i-network"></span> Network</a>
+        <a class="future"><span class="ico i-patterns"></span> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><span class="ico i-checks"></span> Checks</a>
+      </nav>
+      <div class="content">
+        <div class="mhead"><h2>Companies <span class="count">179</span></h2><span class="search"><span class="ico sm i-search"></span> Search…</span><span class="btn ghost"><span class="ico sm i-add"></span> Add company</span></div>
+        <div class="tabs"><span class="tab on">Queue <span class="c">179 due</span></span><span class="tab">All</span><span class="tab">By domain</span><span class="tab">Best prospects</span></div>
+        <div class="secthdr">Never fetched <span class="badge">179</span><span class="grow"></span><span class="btn primary sm"><span class="ico sm i-fetch"></span> Fetch all due</span></div>
+        <div class="qrow"><span class="mono">St</span><div><div class="nm">Stripe</div><div class="meta">Financial Services · Enterprise · Remote-first</div></div><span class="sub">never checked</span><span class="btn primary sm">Fetch jobs →</span></div>
+        <div class="qrow"><span class="mono">1P</span><div><div class="nm">1Password <span class="chip">B2B</span></div><div class="meta">Security · Scaleup · Remote-first</div></div><span class="sub">never checked</span><span class="btn primary sm">Fetch jobs →</span></div>
+        <div class="panel"><div class="ph">Notes — rendered markdown</div><div class="pb">Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure, top-of-market comp.</div></div>
+        <div class="states">States: <span class="chip good">no flags</span><span class="chip warn">caution</span><span class="chip danger">dealbreaker</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ICON SET COMPARISON ============ -->
+  <section style="background:#fff;border:1px solid #d4d4d6;border-radius:14px;padding:1.1rem 1.25rem;box-shadow:0 2px 10px rgba(0,0,0,.08)">
+    <h2 style="margin:0 0 .2rem;font-size:1.15rem">Icon set — pick ONE (no mixing)</h2>
+    <p style="color:#555;margin:0 0 1rem;max-width:76ch">Same nav, real icons from each set, so you can compare line-weight and shape. Whichever we choose, we use it exclusively.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <!-- Heroicons -->
+      <div style="border:1px solid #e5e5e7;border-radius:10px;overflow:hidden">
+        <div style="padding:.5rem .8rem;background:#f7f7f8;border-bottom:1px solid #eee;font-weight:600;font-size:.85rem">Heroicons <span style="color:#888;font-weight:400">— MIT · outline 1.5px</span></div>
+        <div style="background:#2b2521;color:#bcae9a;padding:.6rem .5rem;font-size:.82rem">
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem;color:#fff;background:#43392f;border-radius:7px;margin-bottom:.1rem"><span class="ico i-companies"></span> Companies</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><span class="ico i-today"></span> Today</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><span class="ico i-triage"></span> Triage</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><span class="ico i-pipeline"></span> Pipeline</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><span class="ico i-network"></span> Network</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><span class="ico i-patterns"></span> Patterns</div>
+        </div>
+        <div style="padding:.5rem .8rem;font-size:.78rem;color:#555">Clean, light outline; self-host as inline SVG (no runtime/attribution string). Strong fit for the refined serif look.</div>
+      </div>
+      <!-- FontAwesome -->
+      <div style="border:1px solid #e5e5e7;border-radius:10px;overflow:hidden">
+        <div style="padding:.5rem .8rem;background:#f7f7f8;border-bottom:1px solid #eee;font-weight:600;font-size:.85rem">FontAwesome Free <span style="color:#888;font-weight:400">— CC-BY · solid (filled)</span></div>
+        <div style="background:#2b2521;color:#bcae9a;padding:.6rem .5rem;font-size:.82rem">
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem;color:#fff;background:#43392f;border-radius:7px;margin-bottom:.1rem"><i class="fa-solid fa-building fa-fw"></i> Companies</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><i class="fa-solid fa-house fa-fw"></i> Today</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><i class="fa-solid fa-inbox fa-fw"></i> Triage</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><i class="fa-solid fa-table-columns fa-fw"></i> Pipeline</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><i class="fa-solid fa-user-group fa-fw"></i> Network</div>
+          <div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .55rem"><i class="fa-solid fa-chart-column fa-fw"></i> Patterns</div>
+        </div>
+        <div style="padding:.5rem .8rem;font-size:.78rem;color:#555">Heavier, filled style; the free tier omits many icons (Pro-gated) and needs attribution. Bolder, less airy next to serif type.</div>
+      </div>
+    </div>
+    <p style="color:#555;margin:1rem 0 0;max-width:76ch"><b>My recommendation: Heroicons</b> — the light outline reads better with warm serif headings, and MIT + inline-SVG self-hosting is cleanest for an open-source, local-first app.</p>
+  </section>
+
+  <p style="color:#666;font-size:.85rem;margin-top:1.5rem">Tell me: <b>palette/type</b> (A / B / C, or a mix), <b>icon set</b> (Heroicons / FontAwesome), and <b>font hosting</b> (self-host — fits local-first/offline — vs Google CDN; I lean self-host). Adopting it = swap <code>tokens.css</code> values, add the 3 font-family tokens + <code>@font-face</code>, and drop in the chosen icon set.</p>
+</div>
+</body>
+</html>

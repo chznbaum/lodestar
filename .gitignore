@@ -12,4 +12,5 @@ vite.config.ts.timestamp-*
 
 # Agent working corpus — design docs, plans, scratch, brainstorm, archive, vault-data guides.
 # Local-only; not part of the shipped product. Other agents use it via the local filesystem.
-/.agent/
+/.agent/scratch/*
+!/.agent/scratch/README.md

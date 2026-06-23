@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar — Roles tab directions</title>
+<style>
+/* ============================================================================
+   Tokens lifted verbatim from src/lib/styles/tokens.css (live theme "Vesper").
+   Squared corners (--r-*: 0), aubergine primary, gold accent, warm paper.
+   Fonts fall back to system serif/sans (the app self-hosts Bodoni/Lora/Spline).
+   ============================================================================ */
+:root{
+  --bg:#f1e9e4; --card:#fdf9f5; --card-hover:#f5ece6; --panel-head:#f6ebed;
+  --rail:#241921; --rail-ink:#bca7b3; --rail-ink-active:#fff; --rail-hover:#33232f; --rail-muted:#856f7d; --rail-sep:#382734;
+  --ink:#291d24; --ink-soft:#4b3a45; --muted:#75606c; --faint:#a890a0;
+  --line:#ebdde1; --wire:#dcc7cd;
+  --primary:#7d2348; --primary-hover:#691838; --primary-ring:rgba(125,35,72,.16); --primary-soft:#f3dbe4;
+  --accent:#b58320; --accent-soft:#f4e7c5; --accent-ink:#8a6110;
+  --good:#3c7a52; --good-soft:#daecdf; --warn:#b8701a; --warn-soft:#f6e7c7;
+  --danger:#c23320; --danger-soft:#f7d9d3; --danger-border:#ecb3a8;
+  --flat-soft:#efe1e3;
+  --font-display:"Bodoni Moda",Georgia,serif; --font-body:"Lora",Georgia,serif;
+  --font-sans:"Spline Sans",-apple-system,system-ui,sans-serif;
+  --fs-2xs:.66rem; --fs-xs:.74rem; --fs-sm:.82rem; --fs-md:.92rem; --fs-lg:1.05rem; --fs-xl:1.4rem; --fs-2xl:1.5rem;
+  --monogram-size:2rem; --monogram-fs:.66rem;
+  --sp-1:.25rem; --sp-2:.5rem; --sp-3:.75rem; --sp-4:1rem; --sp-5:1.5rem; --sp-6:2rem;
+  --sp-row-y:.6rem; --sp-content:1.2rem; --rail-w:9.5rem;
+  --r-sm:0; --r-md:0; --r-pill:0; --r-panel:0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-sans);line-height:1.5}
+
+/* ---- page scaffolding (annotations only; not part of the app) ---- */
+.page{max-width:1180px;margin:0 auto;padding:1.6rem 1.25rem 5rem}
+.page h1{font-family:var(--font-display);font-size:1.9rem;margin:0 0 .2rem;color:var(--ink)}
+.page .lede{color:var(--muted);max-width:80ch;font-size:.92rem;margin:.25rem 0 0}
+.page .lede code{background:var(--flat-soft);padding:.05rem .3rem;font-size:.86em}
+.dirhead{margin:2.6rem 0 .2rem;display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;border-top:2px solid var(--primary);padding-top:.8rem}
+.dirhead .n{font-family:var(--font-display);font-weight:700;color:var(--primary);font-size:.8rem;letter-spacing:.12em;text-transform:uppercase}
+.dirhead h2{font-family:var(--font-display);font-size:1.45rem;margin:0;color:var(--ink)}
+.dirhead .tag{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);font-weight:700}
+.rationale{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);padding:.6rem .85rem;margin:.55rem 0 1rem;font-size:.86rem;color:var(--ink-soft)}
+.rationale b{color:var(--ink)} .rationale .trade{color:var(--danger)}
+
+/* ---- app shell (from layout/app.css) ---- */
+.app{display:grid;grid-template-columns:var(--rail-w) 1fr;border:1px solid var(--wire);box-shadow:0 1px 3px rgba(40,15,30,.08);background:var(--card)}
+.rail{background:var(--rail);color:var(--rail-ink);padding:.6rem 0;font-size:var(--fs-sm)}
+.rail__brand{color:var(--rail-ink-active);font-family:var(--font-display);font-size:var(--fs-2xl);font-weight:700;padding:.3rem .55rem .7rem;display:flex;gap:.45rem;align-items:center}
+.rail__brand .star{color:var(--accent)}
+.navlink{display:flex;align-items:center;gap:.45rem;padding:.4rem 1.05rem;font-size:var(--fs-md);font-weight:500;color:var(--rail-ink);text-decoration:none}
+.navlink .ico{width:1rem;text-align:center;opacity:.85}
+.navlink.on{background:var(--rail-ink);color:var(--rail);font-weight:700}
+.navlink.future{color:var(--rail-muted)}
+.rail__sep{height:1px;background:var(--rail-sep);margin:.5rem .4rem}
+.rail__util{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.06em;color:var(--rail-muted);padding:.3rem .55rem .1rem}
+.app__content{min-width:0;background:var(--card)}
+
+/* ---- workspace header (from layout/workspace.css) ---- */
+.workspace{padding:1rem var(--sp-content) 1.2rem}
+.crumbs{font-size:var(--fs-xs);color:var(--muted);margin:0 0 var(--sp-2)}
+.crumbs a{color:var(--primary);text-decoration:none}
+.workspace__header{display:flex;align-items:flex-start;gap:var(--sp-3);flex-wrap:wrap}
+.workspace__name-block{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--sp-2);margin-right:auto}
+.workspace__name{font-family:var(--font-display);font-size:var(--fs-2xl);font-weight:600;margin:0;line-height:1.2}
+.workspace__sub{width:100%;color:var(--muted);font-size:var(--fs-sm);margin:.1rem 0 0}
+.workspace__actions{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
+
+/* ---- atoms (button/chip/tab/panel/monogram/feedback/linkbtn) ---- */
+.btn{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .7rem;border:1px solid var(--wire);border-radius:var(--r-md);background:var(--card);color:var(--ink);font:inherit;font-size:var(--fs-sm);text-decoration:none;cursor:pointer}
+.btn:hover{background:var(--card-hover)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+.btn.primary:hover{background:var(--primary-hover)}
+.btn.primary:disabled{background:var(--card);color:var(--faint);border-color:var(--line);cursor:default;font-weight:400}
+.btn.ghost{border-style:dashed;color:var(--muted)}
+.btn.danger{color:var(--danger);border-color:var(--danger-border)}
+.btn.sm{padding:.26rem .55rem;font-size:var(--fs-xs)}
+.btn:disabled{color:var(--faint);border-color:var(--line);background:var(--card);cursor:default}
+.linkbtn{border:none;background:none;color:var(--primary);cursor:pointer;font:inherit;font-size:var(--fs-sm);padding:0}
+.chip{display:inline-flex;align-items:center;gap:.25rem;font-size:var(--fs-xs);border-radius:var(--r-pill);padding:.2rem .48rem;white-space:nowrap}
+.chip.good{background:var(--good-soft);color:var(--good)} .chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.danger{background:var(--danger-soft);color:var(--danger)} .chip.flat{background:var(--flat-soft);color:var(--muted)}
+.chip.accent{background:var(--accent-soft);color:var(--accent-ink)}
+.chip--count{padding:.1rem .45rem;font-size:.7rem;font-weight:600}
+.tabs{display:flex;gap:var(--sp-1);border-bottom:1px solid var(--line);margin-bottom:.6rem}
+.tab{font:inherit;font-size:var(--fs-sm);padding:.4rem .6rem;color:var(--muted);border:none;border-bottom:2px solid transparent;background:none;cursor:pointer;display:inline-flex;align-items:center;gap:var(--sp-1);margin-bottom:-1px}
+.tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
+.tab .c{font-size:var(--fs-xs);color:var(--accent-ink);font-weight:700}
+.panel{border:1px solid var(--line);border-radius:var(--r-panel);margin-top:var(--sp-3);overflow:hidden}
+.panel__head{display:flex;justify-content:space-between;align-items:center;padding:.5rem .75rem;background:var(--panel-head);border-bottom:1px solid var(--line);font-weight:600;font-size:var(--fs-xs);color:var(--ink)}
+.panel__body{padding:.7rem .8rem}
+.panel .empty{color:var(--faint);font-size:var(--fs-sm);padding:var(--sp-2) .7rem;margin:0}
+.monogram{width:var(--monogram-size);height:var(--monogram-size);border-radius:var(--r-md);background:var(--line);display:inline-grid;place-items:center;font-size:var(--monogram-fs);font-weight:800;color:var(--muted);flex:none}
+.sub{color:var(--faint);font-size:var(--fs-xs)}
+.statusbar{display:flex;align-items:center;gap:var(--sp-3);margin:.7rem 0 .2rem;flex-wrap:wrap;font-size:var(--fs-sm)}
+.role-title{font-family:var(--font-display);font-weight:600}
+
+/* ---- fit-score visual vocabulary (shared by all 3 directions) ---- */
+.fitnum{font-family:var(--font-display);font-weight:700;line-height:1}
+.fitnum.strong{color:var(--good)} .fitnum.good{color:var(--good)} .fitnum.partial{color:var(--warn)}
+.fitnum.weak{color:var(--warn)} .fitnum.dead{color:var(--danger)} .fitnum.unscored{color:var(--faint)}
+.band-dot{width:.6rem;height:.6rem;display:inline-block;flex:none}
+.band-dot.strong{background:var(--good)} .band-dot.good{background:#6ba074}
+.band-dot.partial{background:var(--warn)} .band-dot.weak{background:#d09a4a}
+.band-dot.dead{background:var(--danger)} .band-dot.unscored{background:var(--wire)}
+
+/* live progress pill (the careers-scrape dot from companies-surface, re-themed square) */
+.live{display:inline-flex;align-items:center;gap:.4rem;background:var(--primary-soft);border:1px solid var(--primary-ring);padding:.18rem .5rem;font-size:var(--fs-xs);color:var(--primary)}
+.live .dot{width:.5rem;height:.5rem;background:var(--primary);animation:pulse 1.4s infinite}
+@keyframes pulse{0%{opacity:.35}50%{opacity:1}100%{opacity:.35}}
+.steps{display:inline-flex;gap:2px;vertical-align:middle}
+.steps i{width:.85rem;height:.28rem;background:var(--wire);display:inline-block}
+.steps i.done{background:var(--primary)} .steps i.now{background:var(--primary);animation:pulse 1.4s infinite}
+.steps i.fail{background:var(--danger)}
+
+/* sub-score mini-meters */
+.subgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:.4rem;max-width:24rem}
+.submeter{font-size:var(--fs-2xs);color:var(--muted)}
+.submeter .bar{height:.32rem;background:var(--line);margin-top:.15rem}
+.submeter .bar i{display:block;height:100%;background:var(--accent)}
+.submeter .bar i.lo{background:var(--warn)}
+
+/* ===================== DIRECTION 1 — TRIAGE LIST ===================== */
+.d1-actionbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:.6rem;background:var(--card);border:1px solid var(--line);border-bottom:2px solid var(--primary);padding:.45rem .7rem;font-size:var(--fs-sm);flex-wrap:wrap}
+.d1-actionbar .selcount{font-weight:700;color:var(--ink)}
+.d1-actionbar .sortby{margin-left:auto;color:var(--muted)}
+.d1-actionbar select{font:inherit;font-size:var(--fs-xs);border:1px solid var(--wire);background:var(--card);padding:.2rem .35rem;color:var(--ink-soft)}
+.d1-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-top:none}
+.d1-row{display:grid;grid-template-columns:1.3rem 3.1rem 1fr auto;gap:.7rem;align-items:center;padding:.55rem .7rem;border-bottom:1px solid var(--line)}
+.d1-row:last-child{border-bottom:none}
+.d1-row:hover{background:var(--card-hover)}
+.d1-row.sel{background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary)}
+.d1-row.fetching{background:#fbf4ee}
+.d1-fit{text-align:center}
+.d1-fit .fitnum{font-size:1.35rem}
+.d1-fit .bandlbl{font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.d1-main .t{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.d1-main .t .role-title{font-size:var(--fs-md)}
+.d1-main .meta{color:var(--muted);font-size:var(--fs-xs);margin-top:.15rem;display:flex;gap:.5rem;flex-wrap:wrap}
+.d1-main .meta .dot{color:var(--faint)}
+.d1-end{display:flex;align-items:center;gap:.5rem}
+.d1-statecol{min-width:9.5rem;text-align:right}
+
+/* ===================== DIRECTION 2 — FIT-BANDED BOARD ===================== */
+.d2-toolbar{display:flex;align-items:center;gap:.6rem;font-size:var(--fs-sm);margin-bottom:.6rem;flex-wrap:wrap}
+.d2-toolbar .right{margin-left:auto;display:flex;gap:.5rem;align-items:center}
+.d2-band{margin-top:.9rem;border:1px solid var(--line)}
+.d2-bandhead{display:flex;align-items:center;gap:.5rem;padding:.4rem .7rem;background:var(--panel-head);border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
+.d2-bandhead .name{font-weight:700;color:var(--ink)}
+.d2-bandhead .rng{color:var(--muted);font-size:var(--fs-xs)}
+.d2-bandhead .ct{margin-left:auto;color:var(--muted);font-size:var(--fs-xs)}
+.d2-band.dead .d2-bandhead{background:var(--danger-soft)}
+.d2-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(15.5rem,1fr));gap:.6rem;padding:.6rem}
+.d2-card{border:1px solid var(--line);background:var(--card);padding:.55rem .6rem;display:flex;flex-direction:column;gap:.35rem;position:relative}
+.d2-card.sel{box-shadow:inset 0 0 0 2px var(--primary);background:var(--primary-soft)}
+.d2-card .top{display:flex;justify-content:space-between;gap:.5rem;align-items:flex-start}
+.d2-card .role-title{font-size:var(--fs-md);line-height:1.2}
+.d2-card .fitbadge{font-family:var(--font-display);font-weight:700;font-size:1.2rem;line-height:1}
+.d2-card .meta{color:var(--muted);font-size:var(--fs-xs)}
+.d2-card .cardfoot{display:flex;align-items:center;gap:.4rem;margin-top:.1rem}
+.d2-card label.pick{display:flex;align-items:center;gap:.3rem;font-size:var(--fs-xs);color:var(--muted);cursor:pointer}
+
+/* ===================== DIRECTION 3 — SPLIT LIST + RUN CONSOLE ===================== */
+.d3-wrap{display:grid;grid-template-columns:1fr 19rem;gap:.9rem;align-items:start}
+.d3-list{list-style:none;margin:0;padding:0;border:1px solid var(--line)}
+.d3-row{display:grid;grid-template-columns:1.3rem 1fr auto auto;gap:.6rem;align-items:center;padding:.5rem .65rem;border-bottom:1px solid var(--line)}
+.d3-row:last-child{border-bottom:none}
+.d3-row:hover{background:var(--card-hover)}
+.d3-row.sel{background:var(--primary-soft);box-shadow:inset 3px 0 0 var(--primary)}
+.d3-row .t .role-title{font-size:var(--fs-md)}
+.d3-row .meta{color:var(--muted);font-size:var(--fs-xs);margin-top:.1rem}
+.d3-fit{font-family:var(--font-display);font-weight:700;font-size:1.05rem;min-width:1.8rem;text-align:right}
+.console{border:1px solid var(--line);position:sticky;top:1rem}
+.console h3{margin:0;font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink);background:var(--panel-head);padding:.5rem .7rem;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.console .cbody{padding:.55rem .65rem;display:flex;flex-direction:column;gap:.5rem}
+.crun{border-left:3px solid var(--primary);padding:.1rem 0 .1rem .5rem;font-size:var(--fs-xs)}
+.crun.ok{border-color:var(--good)} .crun.failstart{border-color:var(--danger)} .crun.skip{border-color:var(--warn)}
+.crun .ct{font-weight:600;color:var(--ink);font-size:var(--fs-sm)}
+.crun .ph{color:var(--muted);margin-top:.1rem}
+.crun .out{margin-top:.1rem}
+.console .runidline{color:var(--faint);font-size:var(--fs-2xs);font-family:ui-monospace,monospace}
+.console .csum{font-size:var(--fs-2xs);color:var(--muted);border-top:1px solid var(--line);padding:.45rem .7rem;display:flex;justify-content:space-between}
+@media(max-width:820px){.d3-wrap{grid-template-columns:1fr}.console{position:static}}
+@media(max-width:680px){.app{grid-template-columns:1fr}.rail{display:none}}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Roles tab — three directions</h1>
+  <p class="lede">A redesign of the <b>Roles</b> tab inside the company workspace (<code>companies/[slug]</code>). Built on the live <b>Vesper</b> tokens (squared corners, aubergine primary, gold accent) and real class atoms. All three render the same fetched-role set for one startup (<b>Lattice</b>) so the IA differences are the only variable. Lifecycle: <b>new → fetching (live) → scored → failed</b>. Live phases use the real <code>job_detail</code> stages: jd-scrape → sanitize → structure-jd → gap-detect → research-gaps → fit-score → alignment. Bands: 80+ strong · 60–79 good · 40–59 partial · 20–39 weak · 0–19 mismatch/dealbroken.</p>
+
+  <!-- ====================================================================
+       DIRECTION 1 — TRIAGE LIST
+       ==================================================================== -->
+  <div class="dirhead">
+    <span class="n">Direction 1</span>
+    <h2>Triage List</h2>
+    <span class="tag">flat · sortable · row-is-state</span>
+  </div>
+  <div class="rationale">
+    <b>Rationale.</b> One dense, sortable list; each row carries its whole lifecycle (fit number, state chip, live step-strip, durable outcome). A sticky action bar holds selection + "Fetch selected" so the verb is always reachable while scrolling. Sorting by fit puts best prospects on top the instant scores land.
+    <span class="trade"><b>Tradeoff:</b></span> a long flat list buries band structure — you read scores, not groups; with many roles the eye has to scan to see "which are strong".
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="rail__brand"><span class="star">✦</span> Lodestar</div>
+      <a class="navlink future"><span class="ico">○</span> Today</a>
+      <a class="navlink future"><span class="ico">▤</span> Triage</a>
+      <a class="navlink future"><span class="ico">⇄</span> Pipeline</a>
+      <a class="navlink on"><span class="ico">▣</span> Companies</a>
+      <a class="navlink future"><span class="ico">◴</span> Network</a>
+      <div class="rail__sep"></div>
+      <div class="rail__util">Diagnostics</div>
+      <a class="navlink future"><span class="ico">✚</span> Checks</a>
+    </nav>
+    <div class="app__content">
+      <div class="workspace">
+        <p class="crumbs"><a href="#">← Companies</a> / Lattice</p>
+        <header class="workspace__header">
+          <div class="workspace__name-block">
+            <h1 class="workspace__name">Lattice</h1>
+            <p class="workspace__sub">HR Tech · Scaleup · Series F · Remote-first · San Francisco</p>
+          </div>
+          <span class="chip good">no flags</span>
+          <div class="workspace__actions">
+            <a class="btn sm" href="#">careers ↗</a>
+          </div>
+        </header>
+        <div class="statusbar">
+          <span class="chip flat">Status: Active ▾</span>
+          <span class="sub">last checked: today · 6 roles found</span>
+        </div>
+        <div class="tabs">
+          <button class="tab">Overview</button>
+          <button class="tab on">Roles <span class="c">6</span></button>
+          <button class="tab">Activity</button>
+        </div>
+
+        <!-- sticky action bar -->
+        <div class="d1-actionbar">
+          <input type="checkbox" checked> <span class="selcount">3 selected</span>
+          <button class="btn primary sm">Fetch selected (3)</button>
+          <button class="linkbtn">select all</button>
+          <button class="linkbtn">clear</button>
+          <span class="sortby">sort:
+            <select><option>Fit — best first</option><option>State</option><option>Comp</option><option>Title</option></select>
+          </span>
+        </div>
+
+        <ul class="d1-list">
+          <!-- scored: strong -->
+          <li class="d1-row sel">
+            <input type="checkbox" checked>
+            <div class="d1-fit"><div class="fitnum strong">86</div><div class="bandlbl">strong</div></div>
+            <div class="d1-main">
+              <div class="t"><span class="role-title">Founding Engineer</span> <span class="chip good">scored</span></div>
+              <div class="meta"><span>Senior</span><span class="dot">·</span><span>Remote (US)</span><span class="dot">·</span><span>$210k–$260k + 0.5–1.0%</span><span class="dot">·</span><span>Rust · TS · Postgres</span></div>
+            </div>
+            <div class="d1-end d1-statecol"><button class="btn sm">Open →</button></div>
+          </li>
+          <!-- scored: good -->
+          <li class="d1-row sel">
+            <input type="checkbox" checked>
+            <div class="d1-fit"><div class="fitnum good">71</div><div class="bandlbl">good</div></div>
+            <div class="d1-main">
+              <div class="t"><span class="role-title">Staff Software Engineer, Platform</span> <span class="chip good">scored</span></div>
+              <div class="meta"><span>Senior</span><span class="dot">·</span><span>Remote (US)</span><span class="dot">·</span><span>$200k–$240k</span><span class="dot">·</span><span>Go · k8s</span></div>
+            </div>
+            <div class="d1-end d1-statecol"><button class="btn sm">Open →</button></div>
+          </li>
+          <!-- fetching: live -->
+          <li class="d1-row sel fetching">
+            <input type="checkbox" checked disabled title="can't re-trigger a job that's already fetching">
+            <div class="d1-fit"><div class="fitnum unscored">··</div><div class="bandlbl">scoring</div></div>
+            <div class="d1-main">
+              <div class="t"><span class="role-title">Head of Engineering</span>
+                <span class="live"><span class="dot"></span> research-gaps…</span>
+                <span class="steps" title="jd-scrape ✓ · sanitize ✓ · structure-jd ✓ · gap-detect ✓ · research-gaps (now) · fit-score · alignment"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i></span>
+              </div>
+              <div class="meta"><span>Dept head</span><span class="dot">·</span><span>Remote (US)</span><span class="dot">·</span><span class="sub">researching comp band…</span></div>
+            </div>
+            <div class="d1-end d1-statecol"><button class="linkbtn">cancel</button></div>
+          </li>
+          <!-- dealbroken -->
+          <li class="d1-row">
+            <input type="checkbox">
+            <div class="d1-fit"><div class="fitnum dead">0</div><div class="bandlbl">dealbroken</div></div>
+            <div class="d1-main">
+              <div class="t"><span class="role-title">Senior Engineer, Frontend</span> <span class="chip danger">⛔ dealbreaker · comp</span></div>
+              <div class="meta"><span>Senior</span><span class="dot">·</span><span>Remote (US)</span><span class="dot">·</span><span>$150k–$175k</span><span class="dot">·</span><span class="sub">band tops out at 175k, floor 200k</span></div>
+            </div>
+            <div class="d1-end d1-statecol"><button class="btn sm">Open →</button></div>
+          </li>
+          <!-- new / never fetched -->
+          <li class="d1-row">
+            <input type="checkbox">
+            <div class="d1-fit"><div class="fitnum unscored">—</div><div class="bandlbl">new</div></div>
+            <div class="d1-main">
+              <div class="t"><span class="role-title">Engineering Manager, Growth</span> <span class="chip flat">new</span></div>
+              <div class="meta"><span>Front-line mgmt</span><span class="dot">·</span><span class="sub">no detail yet — select &amp; fetch to score</span></div>
+            </div>
+            <div class="d1-end d1-statecol"></div>
+          </li>
+          <!-- failed -->
+          <li class="d1-row">
+            <input type="checkbox">
+            <div class="d1-fit"><div class="fitnum unscored">!</div><div class="bandlbl">failed</div></div>
+            <div class="d1-main">
+              <div class="t"><span class="role-title">Backend Engineer (contract)</span> <span class="chip danger">failed</span></div>
+              <div class="meta"><span class="sub">jd-scrape · page not found (404)</span></div>
+            </div>
+            <div class="d1-end d1-statecol"><button class="btn sm">Retry</button></div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       DIRECTION 2 — FIT-BANDED BOARD
+       ==================================================================== -->
+  <div class="dirhead">
+    <span class="n">Direction 2</span>
+    <h2>Fit-Banded Board</h2>
+    <span class="tag">grouped-by-band · best-first · cards</span>
+  </div>
+  <div class="rationale">
+    <b>Rationale.</b> Roles are grouped into collapsible band sections (Strong → Dealbroken, plus a Needs-fetch group for unscored/new). Triage becomes "work the Strong band, skim Good, ignore the rest" — the structure does the prioritizing. Cards carry a fit badge + a pick checkbox; the band header offers "fetch all in this band". Dealbroken sits last, visually dampened.
+    <span class="trade"><b>Tradeoff:</b></span> band groups only become meaningful <i>after</i> scoring — before a fetch everything piles into one "Needs fetch" group, so the board looks empty/lopsided on a fresh discovery; also costs more vertical space per role than a list.
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="rail__brand"><span class="star">✦</span> Lodestar</div>
+      <a class="navlink future"><span class="ico">○</span> Today</a>
+      <a class="navlink future"><span class="ico">▤</span> Triage</a>
+      <a class="navlink future"><span class="ico">⇄</span> Pipeline</a>
+      <a class="navlink on"><span class="ico">▣</span> Companies</a>
+      <a class="navlink future"><span class="ico">◴</span> Network</a>
+      <div class="rail__sep"></div>
+      <div class="rail__util">Diagnostics</div>
+      <a class="navlink future"><span class="ico">✚</span> Checks</a>
+    </nav>
+    <div class="app__content">
+      <div class="workspace">
+        <p class="crumbs"><a href="#">← Companies</a> / Lattice</p>
+        <header class="workspace__header">
+          <div class="workspace__name-block">
+            <h1 class="workspace__name">Lattice</h1>
+            <p class="workspace__sub">HR Tech · Scaleup · Series F · Remote-first · San Francisco</p>
+          </div>
+          <span class="chip good">no flags</span>
+          <div class="workspace__actions"><a class="btn sm" href="#">careers ↗</a></div>
+        </header>
+        <div class="tabs">
+          <button class="tab">Overview</button>
+          <button class="tab on">Roles <span class="c">6</span></button>
+          <button class="tab">Activity</button>
+        </div>
+
+        <div class="d2-toolbar">
+          <span class="selcount" style="font-weight:700">3 selected</span>
+          <button class="btn primary sm">Fetch selected (3)</button>
+          <button class="linkbtn">clear</button>
+          <div class="right">
+            <span class="sub">4 scored · 1 fetching · 1 new · 1 failed</span>
+          </div>
+        </div>
+
+        <!-- STRONG -->
+        <div class="d2-band">
+          <div class="d2-bandhead"><span class="band-dot strong"></span><span class="name">Strong</span><span class="rng">80–100</span><span class="ct">1 role · <button class="linkbtn" style="font-size:var(--fs-2xs)">re-fetch band</button></span></div>
+          <div class="d2-cards">
+            <div class="d2-card sel">
+              <div class="top"><span class="role-title">Founding Engineer</span><span class="fitbadge strong" style="color:var(--good)">86</span></div>
+              <div class="meta">Senior · Remote (US) · $210k–$260k + 0.5–1.0%</div>
+              <div class="subgrid">
+                <div class="submeter">Sen<div class="bar"><i style="width:90%"></i></div></div>
+                <div class="submeter">Skl<div class="bar"><i style="width:80%"></i></div></div>
+                <div class="submeter">Cmp<div class="bar"><i style="width:95%"></i></div></div>
+                <div class="submeter">Arr<div class="bar"><i style="width:100%"></i></div></div>
+                <div class="submeter">Dom<div class="bar"><i style="width:60%"></i></div></div>
+              </div>
+              <div class="cardfoot"><label class="pick"><input type="checkbox" checked> selected</label><span style="margin-left:auto"><button class="btn sm">Open →</button></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- GOOD -->
+        <div class="d2-band">
+          <div class="d2-bandhead"><span class="band-dot good"></span><span class="name">Good</span><span class="rng">60–79</span><span class="ct">1 role</span></div>
+          <div class="d2-cards">
+            <div class="d2-card sel">
+              <div class="top"><span class="role-title">Staff Software Engineer, Platform</span><span class="fitbadge" style="color:var(--good)">71</span></div>
+              <div class="meta">Senior · Remote (US) · $200k–$240k · Go · k8s</div>
+              <div class="cardfoot"><span class="chip warn">⚠ caution · skills</span><span style="margin-left:auto"><button class="btn sm">Open →</button></span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- NEEDS FETCH (unscored + fetching + new) -->
+        <div class="d2-band">
+          <div class="d2-bandhead"><span class="band-dot unscored"></span><span class="name">Needs fetch</span><span class="rng">unscored</span><span class="ct">2 roles</span></div>
+          <div class="d2-cards">
+            <div class="d2-card sel">
+              <div class="top"><span class="role-title">Head of Engineering</span><span class="live"><span class="dot"></span> live</span></div>
+              <div class="meta">Dept head · Remote (US)</div>
+              <div class="cardfoot"><span class="sub">research-gaps…</span>
+                <span class="steps" style="margin-left:.3rem"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i></span>
+                <span style="margin-left:auto"><button class="linkbtn">cancel</button></span></div>
+            </div>
+            <div class="d2-card">
+              <div class="top"><span class="role-title">Engineering Manager, Growth</span><span class="chip flat">new</span></div>
+              <div class="meta">Front-line mgmt · no detail yet</div>
+              <div class="cardfoot"><label class="pick"><input type="checkbox"> select</label></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DEALBROKEN -->
+        <div class="d2-band dead">
+          <div class="d2-bandhead"><span class="band-dot dead"></span><span class="name">Dealbroken &amp; mismatch</span><span class="rng">0–19</span><span class="ct">1 role + 1 failed</span></div>
+          <div class="d2-cards">
+            <div class="d2-card">
+              <div class="top"><span class="role-title">Senior Engineer, Frontend</span><span class="fitbadge" style="color:var(--danger)">0</span></div>
+              <div class="meta">$150k–$175k · band tops out at 175k, floor 200k</div>
+              <div class="cardfoot"><span class="chip danger">⛔ dealbreaker · comp</span><span style="margin-left:auto"><button class="btn sm">Open →</button></span></div>
+            </div>
+            <div class="d2-card">
+              <div class="top"><span class="role-title">Backend Engineer (contract)</span><span class="chip danger">failed</span></div>
+              <div class="meta">jd-scrape · page not found (404)</div>
+              <div class="cardfoot"><span style="margin-left:auto"><button class="btn sm">Retry</button></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       DIRECTION 3 — SPLIT LIST + RUN CONSOLE
+       ==================================================================== -->
+  <div class="dirhead">
+    <span class="n">Direction 3</span>
+    <h2>Split List + Run Console</h2>
+    <span class="tag">master list · durable run panel</span>
+  </div>
+  <div class="rationale">
+    <b>Rationale.</b> A compact role list on the left; a persistent <b>Run console</b> on the right that durably records every fetch trigger — <b>started</b> (with run id + live step phase), <b>skipped</b> (already running), and <b>failed-to-start</b> (with reason) — so outcomes never vanish like a toast. The console is the single place to watch live progress and read what happened, decoupled from where rows scroll. Mirrors the existing Checks/run mental model.
+    <span class="trade"><b>Tradeoff:</b></span> splits attention across two regions and spends ~16rem of width on the console; for a quick "select 3, fetch, glance" it's heavier than inline state, and on narrow windows the console drops below the list.
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="rail__brand"><span class="star">✦</span> Lodestar</div>
+      <a class="navlink future"><span class="ico">○</span> Today</a>
+      <a class="navlink future"><span class="ico">▤</span> Triage</a>
+      <a class="navlink future"><span class="ico">⇄</span> Pipeline</a>
+      <a class="navlink on"><span class="ico">▣</span> Companies</a>
+      <a class="navlink future"><span class="ico">◴</span> Network</a>
+      <div class="rail__sep"></div>
+      <div class="rail__util">Diagnostics</div>
+      <a class="navlink future"><span class="ico">✚</span> Checks</a>
+    </nav>
+    <div class="app__content">
+      <div class="workspace">
+        <p class="crumbs"><a href="#">← Companies</a> / Lattice</p>
+        <header class="workspace__header">
+          <div class="workspace__name-block">
+            <h1 class="workspace__name">Lattice</h1>
+            <p class="workspace__sub">HR Tech · Scaleup · Series F · Remote-first · San Francisco</p>
+          </div>
+          <span class="chip good">no flags</span>
+          <div class="workspace__actions"><a class="btn sm" href="#">careers ↗</a></div>
+        </header>
+        <div class="tabs">
+          <button class="tab">Overview</button>
+          <button class="tab on">Roles <span class="c">6</span></button>
+          <button class="tab">Activity</button>
+        </div>
+
+        <div class="d2-toolbar">
+          <span style="font-weight:700">3 selected</span>
+          <button class="btn primary sm">Fetch selected (3)</button>
+          <button class="linkbtn">select all</button>
+          <button class="linkbtn">clear</button>
+          <div class="right"><span class="sub">sort: Fit — best first ▾</span></div>
+        </div>
+
+        <div class="d3-wrap">
+          <ul class="d3-list">
+            <li class="d3-row sel">
+              <input type="checkbox" checked>
+              <div class="t"><span class="role-title">Founding Engineer</span><div class="meta">Senior · Remote (US) · $210k–$260k + equity</div></div>
+              <span class="chip good">scored</span>
+              <span class="d3-fit" style="color:var(--good)">86</span>
+            </li>
+            <li class="d3-row sel">
+              <input type="checkbox" checked>
+              <div class="t"><span class="role-title">Staff Software Engineer, Platform</span><div class="meta">Senior · Remote (US) · $200k–$240k</div></div>
+              <span class="chip warn">caution</span>
+              <span class="d3-fit" style="color:var(--good)">71</span>
+            </li>
+            <li class="d3-row sel">
+              <input type="checkbox" checked disabled>
+              <div class="t"><span class="role-title">Head of Engineering</span><div class="meta"><span class="live"><span class="dot"></span> research-gaps…</span></div></div>
+              <span class="chip flat">fetching</span>
+              <span class="d3-fit" style="color:var(--faint)">··</span>
+            </li>
+            <li class="d3-row">
+              <input type="checkbox">
+              <div class="t"><span class="role-title">Senior Engineer, Frontend</span><div class="meta">$150k–$175k · band below floor</div></div>
+              <span class="chip danger">⛔ dealbreaker</span>
+              <span class="d3-fit" style="color:var(--danger)">0</span>
+            </li>
+            <li class="d3-row">
+              <input type="checkbox">
+              <div class="t"><span class="role-title">Engineering Manager, Growth</span><div class="meta">Front-line mgmt · no detail yet</div></div>
+              <span class="chip flat">new</span>
+              <span class="d3-fit" style="color:var(--faint)">—</span>
+            </li>
+            <li class="d3-row">
+              <input type="checkbox">
+              <div class="t"><span class="role-title">Backend Engineer (contract)</span><div class="meta">jd-scrape · 404</div></div>
+              <span class="chip danger">failed</span>
+              <span class="d3-fit" style="color:var(--faint)">!</span>
+            </li>
+          </ul>
+
+          <aside class="console">
+            <h3>Run console <span class="sub" style="text-transform:none;letter-spacing:0">last fetch</span></h3>
+            <div class="cbody">
+              <div class="crun">
+                <div class="ct">Head of Engineering</div>
+                <div class="runidline">2026-06-21-0007</div>
+                <div class="ph"><span class="live"><span class="dot"></span> research-gaps…</span></div>
+                <div class="out"><span class="steps"><i class="done"></i><i class="done"></i><i class="done"></i><i class="done"></i><i class="now"></i><i></i><i></i></span></div>
+                <div style="margin-top:.25rem"><button class="linkbtn" style="font-size:var(--fs-2xs)">cancel run</button></div>
+              </div>
+              <div class="crun ok">
+                <div class="ct">Founding Engineer</div>
+                <div class="runidline">2026-06-21-0006</div>
+                <div class="ph">✓ complete · scored <b style="color:var(--good)">86</b> (strong)</div>
+              </div>
+              <div class="crun skip">
+                <div class="ct">Staff Software Engineer</div>
+                <div class="ph">⤼ skipped — a fetch for this job is already running</div>
+              </div>
+              <div class="crun failstart">
+                <div class="ct">Backend Engineer (contract)</div>
+                <div class="ph">✕ failed to start — job stub has no url to scrape</div>
+              </div>
+            </div>
+            <div class="csum"><span>spent this run: $0.04</span><span>2 active / 18 cap</span></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

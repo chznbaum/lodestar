@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar — Companies surface: 3 directions</title>
+<style>
+  :root{
+    --ink:#1a1a1a; --muted:#6b7280; --faint:#9ca3af; --line:#e5e7eb;
+    --bg:#fafafa; --card:#fff; --accent:#2563eb; --accent-soft:#e8eefc;
+    --warn:#b45309; --warn-soft:#fef3c7; --danger:#b91c1c; --danger-soft:#fee2e2;
+    --good:#15803d; --good-soft:#dcfce7; --wire:#cbd5e1;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:var(--ink);background:var(--bg);line-height:1.5}
+  .wrap{max-width:1080px;margin:0 auto;padding:2rem 1.5rem 5rem}
+  h1{font-size:1.5rem;margin:0 0 .25rem}
+  h2{font-size:1.05rem;margin:0}
+  .lede{color:var(--muted);max-width:70ch;margin:.25rem 0 1.5rem}
+  .lede code{background:#eef2f7;padding:.05rem .3rem;border-radius:4px;font-size:.85em}
+  .baseline{border:1px dashed var(--wire);border-radius:10px;padding:.85rem 1rem;margin-bottom:2rem;background:#fff;color:var(--muted);font-size:.9rem}
+  .baseline b{color:var(--ink)}
+  .dir{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:1.75rem;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .dir-head{padding:1rem 1.25rem;border-bottom:1px solid var(--line);display:flex;gap:.75rem;align-items:baseline;flex-wrap:wrap}
+  .tag{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fff;background:var(--accent);border-radius:99px;padding:.18rem .55rem}
+  .dir-head .one{color:var(--muted);font-size:.92rem;flex:1;min-width:14rem}
+  .mock{padding:1.25rem;background:#fbfcfe}
+  .verdict{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--line);font-size:.85rem}
+  .verdict>div{padding:.8rem 1.25rem}
+  .verdict .for{border-right:1px solid var(--line)}
+  .verdict h4{margin:0 0 .35rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+  .verdict ul{margin:0;padding-left:1.1rem}
+  .verdict li{margin:.15rem 0}
+
+  /* ---- shared wireframe atoms ---- */
+  .ui{font-size:.8rem;border:1px solid var(--wire);border-radius:10px;background:#fff;overflow:hidden}
+  .topbar{display:flex;gap:.5rem;align-items:center;padding:.55rem .7rem;border-bottom:1px solid var(--line);background:#fff}
+  .pill{border:1px solid var(--wire);border-radius:99px;padding:.2rem .6rem;color:var(--muted);background:#fff;white-space:nowrap}
+  .pill.on{background:var(--accent-soft);border-color:#c7d7fb;color:var(--accent);font-weight:600}
+  .grow{flex:1}
+  .searchbox{flex:1;min-width:6rem;border:1px solid var(--wire);border-radius:7px;padding:.25rem .55rem;color:var(--faint)}
+  .btn{border:1px solid var(--wire);border-radius:7px;padding:.25rem .55rem;background:#fff;white-space:nowrap}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.ghost{border-style:dashed;color:var(--muted)}
+  .sub{color:var(--faint);font-size:.74rem}
+  .muted{color:var(--muted)}
+  .chip{font-size:.66rem;border-radius:99px;padding:.08rem .42rem;white-space:nowrap}
+  .chip.warn{background:var(--warn-soft);color:var(--warn)}
+  .chip.good{background:var(--good-soft);color:var(--good)}
+  .chip.danger{background:var(--danger-soft);color:var(--danger)}
+  .chip.flat{background:#eef2f7;color:var(--muted)}
+  .fit{font-weight:700}
+  .fit.hi{color:var(--good)} .fit.mid{color:var(--warn)}
+
+  /* Direction A: queue */
+  .qrow{display:grid;grid-template-columns:1fr auto auto;gap:.75rem;align-items:center;padding:.6rem .75rem;border-bottom:1px solid var(--line)}
+  .qrow:last-child{border-bottom:none}
+  .qrow .nm{font-weight:600}
+  .qmeta{color:var(--muted);font-size:.74rem;margin-top:.05rem}
+  .sectionhdr{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;background:#f3f6fb;border-bottom:1px solid var(--line);font-weight:600;color:#374151}
+  .count-badge{background:#fff;border:1px solid var(--wire);border-radius:99px;padding:0 .45rem;font-size:.7rem;color:var(--muted);font-weight:600}
+
+  /* Direction B: cards */
+  .cardgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;padding:.75rem}
+  .ccard{border:1px solid var(--wire);border-radius:10px;padding:.6rem .65rem;background:#fff;display:flex;flex-direction:column;gap:.3rem;min-height:6.5rem}
+  .ccard .logo{width:1.4rem;height:1.4rem;border-radius:5px;background:#e5e7eb;display:inline-grid;place-items:center;font-size:.62rem;color:#6b7280;font-weight:700}
+  .ccard .top{display:flex;align-items:center;gap:.4rem}
+  .ccard .nm{font-weight:600}
+  .ccard .foot{margin-top:auto;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+  .grouphdr{grid-column:1/-1;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);padding:.4rem .15rem 0}
+
+  /* Direction C: master-detail */
+  .md{display:grid;grid-template-columns:11rem 1fr;min-height:20rem}
+  .rail{border-right:1px solid var(--line);background:#fff}
+  .rail .railsearch{padding:.45rem .55rem;border-bottom:1px solid var(--line)}
+  .railitem{padding:.4rem .6rem;border-bottom:1px solid #f1f5f9;color:var(--muted)}
+  .railitem.sel{background:var(--accent-soft);color:var(--accent);font-weight:600;border-left:3px solid var(--accent);padding-left:calc(.6rem - 3px)}
+  .work{padding:.9rem 1rem;background:#fff}
+  .work .whead{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-bottom:.15rem}
+  .work .wname{font-size:1.05rem;font-weight:700}
+  .work .wsub{color:var(--muted);font-size:.78rem}
+  .work .actions{display:flex;gap:.4rem;align-items:center;margin:.6rem 0 .75rem;flex-wrap:wrap}
+  .panel{border:1px solid var(--line);border-radius:9px;margin-bottom:.6rem;overflow:hidden}
+  .panel>.ph{padding:.4rem .6rem;background:#f8fafc;border-bottom:1px solid var(--line);font-weight:600;font-size:.76rem;display:flex;justify-content:space-between}
+  .panel>.pb{padding:.5rem .6rem}
+  .jobline{display:grid;grid-template-columns:1fr auto auto auto;gap:.5rem;align-items:center;padding:.28rem 0;border-bottom:1px solid #f1f5f9}
+  .jobline:last-child{border-bottom:none}
+  .notesblock{color:var(--muted)}
+  .notesblock b{color:var(--ink)}
+  .tabs{display:flex;gap:.3rem;margin-bottom:.5rem}
+  .tab{font-size:.74rem;padding:.2rem .5rem;border-radius:7px 7px 0 0;border:1px solid var(--line);border-bottom:none;background:#f8fafc;color:var(--muted)}
+  .tab.on{background:#fff;color:var(--ink);font-weight:600}
+
+  .note{font-size:.82rem;color:var(--muted);margin:.5rem 0 0}
+  .legend{font-size:.78rem;color:var(--faint);margin-top:.4rem}
+  @media (max-width:720px){.cardgrid{grid-template-columns:1fr 1fr}.verdict{grid-template-columns:1fr}.verdict .for{border-right:none;border-bottom:1px solid var(--line)}.md{grid-template-columns:1fr}.rail{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Companies — three directions for a real app surface</h1>
+  <p class="lede">Each is a different answer to “what is this surface <i>for</i>,” not just a different skin. They’re <b>not mutually exclusive</b> — the likely end-state blends them (a daily action view + a real per-company workspace + a coverage/prospects mode). The point of this page is to tell me which emphasis is <b>primary</b>. Wireframe fidelity on purpose — we’re choosing structure, not pixels. Real company data from your vault; the <code>Fetch jobs</code> action runs the scrape→structure→align pipeline.</p>
+
+  <div class="baseline">
+    <b>Today’s baseline (what we’re replacing):</b> a 5-column row grid + a cramped sidebar detail — a faithful Airtable clone. Because all 179 companies are <code>active</code> and none have ever been checked, “due for a check” returns <b>all 179, undifferentiated</b> — the primary daily question answers “everyone.” There is no create, no remove, no fetch, no roles-found, and the by-domain group miscounts (136 of 179 are multi-domain).
+  </div>
+
+  <!-- ============ DIRECTION A ============ -->
+  <section class="dir">
+    <div class="dir-head">
+      <span class="tag">A</span>
+      <h2>Action queue</h2>
+      <span class="one">Opens on the work: who needs fetching/checking, one click to do it. Browsing is secondary.</span>
+    </div>
+    <div class="mock">
+      <div class="ui">
+        <div class="topbar">
+          <span class="pill on">Queue</span>
+          <span class="pill">Browse all</span>
+          <span class="pill">By domain</span>
+          <span class="pill">Best prospects</span>
+          <span class="grow"></span>
+          <span class="searchbox">Search…</span>
+          <span class="btn ghost">+ Add company</span>
+        </div>
+
+        <div class="sectionhdr">Never fetched <span class="count-badge">179</span>
+          <span class="grow"></span><span class="btn primary">Fetch all due ▸</span></div>
+
+        <div class="qrow">
+          <div><div class="nm">Stripe</div><div class="qmeta">financial services · enterprise · remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary">Fetch jobs →</span>
+        </div>
+        <div class="qrow">
+          <div><div class="nm">15Five</div><div class="qmeta">human resources · startup · fully remote</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary">Fetch jobs →</span>
+        </div>
+        <div class="qrow">
+          <div><div class="nm">1Password</div><div class="qmeta">security · scaleup · remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary">Fetch jobs →</span>
+        </div>
+
+        <div class="sectionhdr">Checked &gt; 3 days ago <span class="count-badge">0</span><span class="muted sub" style="margin-left:.5rem">— fills in once you start fetching</span></div>
+        <div class="qrow" style="opacity:.55">
+          <div><div class="nm">Alloy</div><div class="qmeta">fintech · scaleup · 2 roles found</div></div>
+          <span class="sub">checked 6d ago</span>
+          <span class="btn">Re-fetch ↻</span>
+        </div>
+      </div>
+      <p class="legend">Think “Today,” scoped to companies. The verb is <b>fetch</b>. Bulk-fetch the due set; re-fetch ages back into the queue. Everything else (all / domain / prospects) is a tab.</p>
+    </div>
+    <div class="verdict">
+      <div class="for"><h4>Strong for</h4><ul>
+        <li>“What do I do right now” — the daily driver</li>
+        <li>Makes the pipeline the center of gravity</li>
+        <li>Bulk + per-company fetch; re-fetch cadence is visible</li>
+      </ul></div>
+      <div><h4>Weak for</h4><ul>
+        <li>Scanning the whole portfolio / comparing companies</li>
+        <li>Coverage-gap and “best prospects” thinking (secondary tabs)</li>
+        <li>Deep single-company work still needs a detail view</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ============ DIRECTION B ============ -->
+  <section class="dir">
+    <div class="dir-head">
+      <span class="tag">B</span>
+      <h2>Portfolio board</h2>
+      <span class="one">Companies as rich cards you scan and segment — where are the roles, the fit, the gaps?</span>
+    </div>
+    <div class="mock">
+      <div class="ui">
+        <div class="topbar">
+          <span class="muted">View:</span>
+          <span class="pill on">Prospects</span>
+          <span class="pill">Coverage</span>
+          <span class="pill">All</span>
+          <span class="grow"></span>
+          <span class="searchbox">Search…</span>
+          <span class="pill">size ▾</span><span class="pill">stage ▾</span><span class="pill">remote ▾</span>
+          <span class="btn ghost">+ Add</span>
+        </div>
+        <div class="cardgrid">
+          <div class="grouphdr">Most roles found</div>
+          <div class="ccard">
+            <div class="top"><span class="logo">St</span><span class="nm">Stripe</span></div>
+            <div class="sub">financial services · enterprise</div>
+            <div class="foot"><span class="chip good">3 roles</span><span class="fit hi">fit 8</span><span class="chip flat">remote-first</span></div>
+          </div>
+          <div class="ccard">
+            <div class="top"><span class="logo">Al</span><span class="nm">Alloy</span></div>
+            <div class="sub">fintech · scaleup</div>
+            <div class="foot"><span class="chip good">2 roles</span><span class="fit mid">fit 6</span><span class="chip flat">fully remote</span></div>
+          </div>
+          <div class="ccard">
+            <div class="top"><span class="logo">15</span><span class="nm">15Five</span></div>
+            <div class="sub">human resources · startup</div>
+            <div class="foot"><span class="chip good">1 role</span><span class="fit mid">fit 6</span><span class="chip flat">fully remote</span></div>
+          </div>
+          <div class="grouphdr">Checked, nothing yet</div>
+          <div class="ccard" style="opacity:.7">
+            <div class="top"><span class="logo">Va</span><span class="nm">Vanta</span></div>
+            <div class="sub">security · scaleup</div>
+            <div class="foot"><span class="chip flat">0 roles</span><span class="sub">checked 2d</span></div>
+          </div>
+          <div class="ccard" style="opacity:.7">
+            <div class="top"><span class="logo">1P</span><span class="nm">1Password</span></div>
+            <div class="sub">security · scaleup</div>
+            <div class="foot"><span class="chip flat">0 roles</span><span class="sub">checked 5d</span></div>
+          </div>
+          <div class="ccard" style="opacity:.55;border-style:dashed">
+            <div class="top"><span class="logo">+</span><span class="nm muted">Not fetched (174)</span></div>
+            <div class="sub">never checked</div>
+            <div class="foot"><span class="btn primary">Fetch jobs</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="legend"><b>Coverage</b> view re-groups the same cards by domain (multi-domain aware — a company appears under each of its domains). Detail opens as a full page, not a cramped rail.</p>
+    </div>
+    <div class="verdict">
+      <div class="for"><h4>Strong for</h4><ul>
+        <li>“Where should I invest research” — best prospects at a glance</li>
+        <li>Coverage gaps by domain (done right)</li>
+        <li>Logos + at-a-glance signal; feels like a CRM, not a spreadsheet</li>
+      </ul></div>
+      <div><h4>Weak for</h4><ul>
+        <li>Mostly dead until jobs exist (today: 179 identical “0 roles” cards)</li>
+        <li>Cards waste space for a 179-row list you scan by name</li>
+        <li>Less obvious where the daily “fetch” verb lives</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ============ DIRECTION C ============ -->
+  <section class="dir">
+    <div class="dir-head">
+      <span class="tag">C</span>
+      <h2>Company workspace</h2>
+      <span class="one">A nav rail + a real per-company <i>page</i>: fetch, review roles, read notes, see contacts, act.</span>
+    </div>
+    <div class="mock">
+      <div class="ui">
+        <div class="md">
+          <div class="rail">
+            <div class="railsearch sub">🔍 Search 179…</div>
+            <div class="railitem sel">Stripe</div>
+            <div class="railitem">15Five</div>
+            <div class="railitem">1Password</div>
+            <div class="railitem">Alloy</div>
+            <div class="railitem">Vanta</div>
+            <div class="railitem sub">+ Add company</div>
+          </div>
+          <div class="work">
+            <div class="whead"><span class="wname">Stripe</span><span class="chip flat">active ▾</span><span class="chip good">no flags</span></div>
+            <div class="wsub">financial services, payment infra · enterprise · series C+ · remote-first · SF / Dublin</div>
+            <div class="actions">
+              <span class="btn primary">⟳ Fetch jobs</span>
+              <span class="sub">last checked: never</span>
+              <span class="grow"></span>
+              <a class="btn" >website ↗</a><a class="btn">careers ↗</a>
+            </div>
+
+            <div class="tabs"><span class="tab on">Overview</span><span class="tab">Roles (3)</span><span class="tab">Contacts</span><span class="tab">Activity</span></div>
+
+            <div class="panel">
+              <div class="ph">Roles found <span class="sub">3 · sorted by fit</span></div>
+              <div class="pb">
+                <div class="jobline"><span>Staff Software Engineer</span><span class="fit hi">fit 8</span><span class="chip flat">remote</span><span class="sub">$250k →</span></div>
+                <div class="jobline"><span>Senior Engineering Manager</span><span class="fit hi">fit 8</span><span class="chip flat">remote</span><span class="sub">— →</span></div>
+                <div class="jobline"><span>Senior Software Engineer</span><span class="fit mid">fit 6</span><span class="chip flat">remote</span><span class="sub">$210k →</span></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="ph">Notes <span class="sub">rendered markdown · edit ✎</span></div>
+              <div class="pb notesblock"><b>Why listed.</b> Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure. Top-of-market comp (senior eng $250k+). Payments → SOC2/security expertise valued.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="legend">The list is just navigation; the value is the <b>workspace</b>. This is the literal answer to “looking at a single company, I click to fetch jobs.” Add/remove live in the rail + a workspace action.</p>
+    </div>
+    <div class="verdict">
+      <div class="for"><h4>Strong for</h4><ul>
+        <li>Deep single-company work — fetch, review roles, read/act</li>
+        <li>Closest to your stated mental model (“click to fetch on a company”)</li>
+        <li>Room for roles + contacts + alignment + activity without cramping</li>
+      </ul></div>
+      <div><h4>Weak for</h4><ul>
+        <li>No strong “what needs me across all companies today” answer</li>
+        <li>Coverage / best-prospects need a separate mode</li>
+        <li>Closest structurally to the current grid+detail (risk of feeling familiar)</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <p class="note"><b>My read:</b> the daily reality is A (a fetch queue is the verb you repeat), the deep reality is C (a company is a workspace, not a row), and B is a <i>mode</i> that only earns its keep once jobs exist. I’d lean toward <b>A as the home + C as the detail</b>, with B’s coverage/prospects as switchable views — but that’s exactly the call I want from you. Tell me which is primary, or describe a blend.</p>
+</div>
+</body>
+</html>

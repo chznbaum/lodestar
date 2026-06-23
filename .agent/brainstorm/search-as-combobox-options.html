@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar · Vesper — search-as-combobox: three directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Vesper trio: Bodoni Moda (display / company names) · Lora (prose) · Spline Sans (UI) -->
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,600;6..96,700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Spline+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+
+  /* ============================================================
+     VESPER tokens — verbatim from lodestar/src/lib/styles/tokens.css
+     (the REAL app: squared-off, --r-*:0). Font families match @fontsource.
+     ============================================================ */
+  :root{
+    --bg:#f1e9e4; --card:#fdf9f5; --card-hover:#f5ece6; --panel-head:#f6ebed;
+    --rail:#241921; --rail-ink:#bca7b3; --rail-hover:#33232f; --rail-muted:#856f7d; --rail-sep:#382734;
+    --ink:#291d24; --ink-soft:#4b3a45; --muted:#75606c; --faint:#a890a0;
+    --line:#ebdde1; --wire:#dcc7cd;
+    --primary:#7d2348; --primary-hover:#691838; --primary-ring:rgba(125,35,72,.16); --primary-soft:#f3dbe4;
+    --accent:#b58320; --accent-soft:#f4e7c5; --accent-ink:#8a6110;
+    --good:#3c7a52; --good-soft:#daecdf; --warn:#b8701a; --warn-soft:#f6e7c7;
+    --danger:#c23320; --danger-soft:#f7d9d3; --danger-border:#ecb3a8;
+    --flat-soft:#efe1e3;
+
+    --font-display:"Bodoni Moda",Georgia,serif;
+    --font-body:"Lora",Georgia,serif;
+    --font-sans:"Spline Sans",-apple-system,system-ui,sans-serif;
+
+    --fs-2xs:0.66rem; --fs-xs:0.74rem; --fs-sm:0.82rem; --fs-md:0.92rem;
+    --fs-lg:1.05rem; --fs-xl:1.4rem; --fs-2xl:1.5rem;
+
+    --monogram-size:2rem; --monogram-fs:0.66rem;
+
+    --sp-1:0.25rem; --sp-2:0.5rem; --sp-3:0.75rem; --sp-4:1rem; --sp-5:1.5rem; --sp-6:2rem;
+    --sp-row-y:0.6rem; --sp-content:1.2rem;
+
+    /* SQUARED — the real Vesper decision (crisp straight edges) */
+    --r-sm:0; --r-md:0; --r-lg:0; --r-pill:0;
+
+    --shadow-pop:0 1px 0 rgba(255,255,255,.7) inset,0 18px 44px -16px rgba(40,15,30,.42),0 4px 12px -8px rgba(40,15,30,.3);
+    --ease:cubic-bezier(.2,.7,.3,1); --transition-fast:.12s; --transition:.14s;
+  }
+
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;color:var(--ink);line-height:1.55;font-family:var(--font-body);
+    background:
+      radial-gradient(120% 80% at 10% -10%, #f7efe9 0%, rgba(247,239,233,0) 55%),
+      radial-gradient(120% 90% at 100% 0%, #efe2e4 0%, rgba(239,226,228,0) 50%),
+      linear-gradient(180deg,#f2eae5 0%, #ece1dd 100%);
+    background-attachment:fixed;padding:2.6rem 1.25rem 6rem;
+  }
+  .wrap{max-width:1100px;margin:0 auto}
+
+  /* -------- masthead / doc chrome -------- */
+  .kicker{font-family:var(--font-sans);font-size:.66rem;font-weight:700;letter-spacing:.32em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 .6rem}
+  h1.title{font-family:var(--font-display);font-weight:600;font-size:clamp(2rem,5vw,3rem);line-height:1.04;margin:0;letter-spacing:.004em;color:var(--ink)}
+  h1.title em{font-style:italic;font-weight:500;color:var(--primary)}
+  .lede{font-family:var(--font-body);color:var(--muted);max-width:78ch;margin:1rem 0 0;font-size:.98rem}
+  .lede code,.secsub code,.ann code{font-family:ui-monospace,'SF Mono',monospace;background:var(--flat-soft);padding:.05rem .34rem;border-radius:3px;font-size:.84em;color:var(--ink-soft)}
+  .lede b{color:var(--ink)}
+  .rule{height:1px;background:linear-gradient(90deg,var(--wire) 0%,rgba(220,199,205,0) 80%);margin:1.5rem 0 0}
+
+  .sec{margin-top:2.8rem}
+  .sec>.sechd{display:flex;align-items:baseline;gap:.7rem;margin-bottom:.2rem;flex-wrap:wrap}
+  .sec>.sechd h2{font-family:var(--font-display);font-weight:600;font-size:1.5rem;margin:0;color:var(--ink);letter-spacing:.003em}
+  .sec>.sechd .num{font-family:var(--font-sans);font-size:.7rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--accent-ink)}
+  .sec>.sechd .tag{font-family:var(--font-sans);font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:.16rem .5rem;border:1px solid var(--wire);color:var(--muted)}
+  .sec>.sechd .tag.rec{color:var(--primary);border-color:var(--primary-ring);background:var(--primary-soft)}
+  .sec>.secsub{font-family:var(--font-body);color:var(--muted);font-size:.92rem;margin:.25rem 0 1.2rem;max-width:80ch}
+
+  .stage{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+    box-shadow:0 26px 54px -34px rgba(60,25,45,.5),0 1px 0 rgba(255,255,255,.6) inset;
+    padding:1.5rem 1.4rem 1.6rem;position:relative}
+  .stage+.stage{margin-top:1.1rem}
+  .caption{font-family:var(--font-sans);font-size:.62rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 .9rem}
+  .stage.muted{background:var(--bg);box-shadow:none;border-style:dashed}
+
+  /* annotation chips + columns */
+  .ann{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.1rem}
+  .ann .a{display:flex;align-items:center;gap:.45rem;font-family:var(--font-sans);font-size:.72rem;color:var(--ink-soft);background:var(--flat-soft);border:1px solid var(--line);border-radius:var(--r-pill);padding:.26rem .62rem}
+  .ann .a b{font-weight:700;color:var(--ink)}
+  .ann .a.no{color:var(--muted)}
+  .ann .a.no b{color:var(--muted)}
+  .splitnote{font-family:var(--font-sans);font-size:.82rem;color:var(--ink-soft);margin-top:1rem;padding-left:1.05rem}
+  .splitnote li{margin:.2rem 0}
+  .splitnote b{color:var(--ink)}
+  .splitnote .why{color:var(--primary);font-weight:700}
+
+  /* ============================================================
+     APP CHROME — faithful to the live Companies page (squared)
+     ============================================================ */
+  .app{font-family:var(--font-sans)}
+  .companies__header{display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem}
+  .companies__header h1{font-family:var(--font-display);font-size:var(--fs-2xl);font-weight:600;margin:0;white-space:nowrap;color:var(--ink)}
+  .companies__count{background:var(--accent-ink);color:var(--accent-soft);border-radius:var(--r-pill);padding:.12rem .5rem;font-weight:700;font-size:var(--fs-xs);margin-left:.35rem}
+
+  /* canonical input (elements.css) */
+  input[type="text"]{width:100%;border:1px solid var(--wire);border-radius:var(--r-md);background:var(--card);color:var(--ink);font-family:var(--font-sans);font-size:var(--fs-sm);padding:.32rem .6rem}
+  input[type="text"]:focus{outline:2px solid var(--primary);outline-offset:1px}
+  .companies__search{flex:1;min-width:6rem}
+  .search-wrap{flex:1;position:relative;display:flex;align-items:center;gap:.5rem}
+
+  .btn{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .7rem;border:1px solid var(--wire);border-radius:var(--r-md);background:var(--card);color:var(--ink);font:inherit;font-family:var(--font-sans);font-size:var(--fs-sm);cursor:pointer;white-space:nowrap}
+  .btn.ghost{border-style:dashed;color:var(--muted)}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+  .btn.sm{padding:.26rem .55rem;font-size:var(--fs-xs)}
+
+  .tabs{display:flex;gap:var(--sp-1);border-bottom:1px solid var(--line);margin-bottom:.6rem}
+  .tab{font-family:var(--font-sans);font-size:var(--fs-sm);padding:.4rem .6rem;color:var(--muted);border:none;border-bottom:2px solid transparent;background:none;cursor:pointer;display:inline-flex;align-items:center;gap:var(--sp-1);margin-bottom:-1px}
+  .tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
+  .tab__count{font-size:var(--fs-xs);color:var(--accent-ink);font-weight:700}
+
+  .companies__filters{display:flex;gap:var(--sp-1);flex-wrap:wrap;align-items:center;margin-bottom:.6rem;font-size:var(--fs-xs)}
+  .companies__filters .sub{margin-left:auto;color:var(--muted);font-family:var(--font-sans);font-size:var(--fs-xs)}
+
+  .filter-count{font-family:var(--font-sans);font-size:var(--fs-xs);color:var(--muted);margin:.1rem 0 .5rem}
+  .filter-count b{color:var(--ink-soft);font-weight:700}
+  .filter-count .q{color:var(--accent-ink);font-weight:700}
+
+  /* combobox trigger (closed) — for filter-row context + Option B trigger */
+  .cbx{position:relative;font-family:var(--font-sans);display:inline-block;min-width:9.5rem}
+  .cbx-trigger{display:flex;align-items:center;gap:.5rem;width:100%;font-family:var(--font-sans);font-size:var(--fs-sm);font-weight:500;padding:.32rem .55rem;background:var(--card);color:var(--ink);border:1px solid var(--wire);border-radius:var(--r-md);cursor:pointer;text-align:left;line-height:1.2}
+  .cbx-trigger .lab{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cbx-trigger .lab .key{color:var(--muted);font-weight:600}
+  .cbx-trigger.is-any .lab .val{color:var(--faint);font-weight:500;font-style:italic}
+  .cbx-trigger .chev{flex:none;color:var(--primary);font-size:1.1rem;line-height:1}
+  .cbx.open .cbx-trigger{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-ring)}
+
+  /* table rows (the "All" view) */
+  .thead{display:grid;grid-template-columns:var(--monogram-size) 13rem 1fr 7rem 6rem;gap:var(--sp-4);padding:var(--sp-row-y) .2rem;border-bottom:2px solid var(--line);font-family:var(--font-sans);font-size:var(--fs-xs);color:var(--faint)}
+  .clist{list-style:none;margin:0;padding:0}
+  .clist li{border-bottom:1px solid var(--line)}
+  .crow{display:grid;grid-template-columns:var(--monogram-size) 13rem 1fr 7rem 6rem;gap:var(--sp-4);align-items:center;width:100%;padding:var(--sp-row-y) .2rem;border:none;background:none;font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
+  .crow:hover{background:var(--card-hover)}
+  .crow.active{background:var(--primary-soft);box-shadow:inset 0 0 0 1px var(--primary-ring)}
+  .monogram{width:var(--monogram-size);height:var(--monogram-size);border-radius:var(--r-md);background:var(--line);display:inline-grid;place-items:center;font-family:var(--font-sans);font-size:var(--monogram-fs);font-weight:800;color:var(--muted);flex:none}
+  .company-row__name{font-family:var(--font-display);font-size:var(--fs-lg);font-weight:600;font-variation-settings:"opsz" 11,"wght" 600;color:var(--ink);line-height:1.1;display:flex;align-items:center;gap:.3rem;flex-wrap:wrap}
+  .cmeta{color:var(--muted);font-family:var(--font-sans);font-size:var(--fs-sm)}
+  .reason{display:block;font-family:var(--font-sans);font-size:var(--fs-2xs);color:var(--faint);margin-top:.12rem}
+
+  .chip{font-family:var(--font-sans);font-size:var(--fs-xs);border-radius:var(--r-pill);padding:.2rem .48rem;white-space:nowrap}
+  .chip.flat{background:var(--flat-soft);color:var(--muted)}
+  .chip.warn{background:var(--warn-soft);color:var(--warn)}
+  .chip.danger{background:var(--danger-soft);color:var(--danger)}
+
+  /* the gold match highlight (combobox-identical) */
+  mark{background:var(--accent-soft);color:var(--accent-ink);border-radius:0;padding:0 .06em;font-weight:700}
+
+  /* keyboard hint chip near the search (Option C / B) */
+  .kbdhint{font-family:var(--font-sans);font-size:var(--fs-2xs);font-weight:600;letter-spacing:.03em;color:var(--faint);border:1px solid var(--wire);border-radius:var(--r-md);padding:.12rem .4rem;background:var(--card);white-space:nowrap;flex:none}
+  .kbdhint kbd{font-family:var(--font-sans);color:var(--ink-soft)}
+
+  /* ============================================================
+     Option B — the typeahead popover (company jump list)
+     ============================================================ */
+  .jump-pop{position:absolute;z-index:40;top:calc(100% + .35rem);left:0;right:0;
+    background:var(--card);border:1px solid var(--wire);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);overflow:hidden}
+  .jump-search{display:flex;align-items:center;gap:.5rem;padding:.45rem .55rem;border-bottom:1px solid var(--line);background:var(--panel-head)}
+  .jump-search .mag{color:var(--primary);font-size:.85rem;flex:none}
+  .jump-search input{flex:1;min-width:0;border:none;background:transparent;outline:none;font-family:var(--font-sans);font-size:var(--fs-sm);font-weight:500;color:var(--ink);padding:.05rem 0}
+  .jump-list{list-style:none;margin:0;padding:.3rem;max-height:21rem;overflow-y:auto}
+  .jump-opt{display:grid;grid-template-columns:var(--monogram-size) 1fr auto;gap:.6rem;align-items:center;padding:.4rem .5rem;cursor:pointer;position:relative}
+  .jump-opt:hover{background:var(--card-hover)}
+  .jump-opt.active{background:var(--primary-soft);box-shadow:inset 0 0 0 1px var(--primary-ring)}
+  .jump-opt .jname{font-family:var(--font-display);font-size:var(--fs-md);font-weight:600;color:var(--ink);line-height:1.15}
+  .jump-opt .jsub{font-family:var(--font-sans);font-size:var(--fs-2xs);color:var(--muted);margin-top:.05rem}
+  .jump-opt .jsub .why{color:var(--faint)}
+  .jump-opt .enter{font-family:var(--font-sans);font-size:var(--fs-2xs);color:var(--primary);opacity:0;font-weight:700}
+  .jump-opt.active .enter{opacity:1}
+  .jump-foot{display:flex;align-items:center;gap:.4rem;padding:.4rem .65rem;border-top:1px solid var(--line);background:var(--panel-head);font-family:var(--font-sans);font-size:var(--fs-2xs);color:var(--muted)}
+  .jump-foot b{color:var(--ink-soft);font-weight:700}
+  .jump-foot .spacer{flex:1}
+
+  /* empty states (inline + popover) */
+  .empty-inline{font-family:var(--font-sans);text-align:center;color:var(--muted);padding:2rem 1rem}
+  .empty-inline .ico{width:2.4rem;height:2.4rem;border-radius:50%;display:grid;place-items:center;margin:0 auto .55rem;background:var(--flat-soft);color:var(--faint);font-size:1.1rem}
+  .empty-inline .ttl{font-size:var(--fs-sm);font-weight:600;color:var(--ink-soft)}
+  .empty-inline .ttl q{color:var(--primary);font-style:normal;font-weight:700}
+  .empty-inline .hint{font-size:var(--fs-xs);color:var(--faint);margin-top:.2rem}
+  .empty-inline .clearbtn{margin-top:.75rem;font-family:var(--font-sans);font-size:var(--fs-xs);font-weight:600;color:var(--primary);background:var(--primary-soft);border:1px solid var(--primary-ring);border-radius:var(--r-pill);padding:.28rem .75rem;cursor:pointer}
+
+  /* ============================================================
+     Decision table
+     ============================================================ */
+  .cmp{width:100%;border-collapse:collapse;font-family:var(--font-sans);font-size:.82rem;margin-top:.5rem}
+  .cmp th,.cmp td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--line);vertical-align:top}
+  .cmp thead th{font-size:.7rem;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);border-bottom:2px solid var(--line)}
+  .cmp tbody th{font-weight:600;color:var(--ink-soft);white-space:nowrap}
+  .cmp td{color:var(--ink-soft)}
+  .cmp .col-rec{background:var(--primary-soft)}
+  .cmp .yes{color:var(--good);font-weight:700}
+  .cmp .no{color:var(--faint)}
+  .cmp .name{font-weight:700;color:var(--ink)}
+
+  .footnote{font-family:var(--font-body);color:var(--muted);font-size:.84rem;margin-top:1.8rem;max-width:84ch}
+  .footnote code{font-family:ui-monospace,'SF Mono',monospace;background:var(--flat-soft);padding:.05rem .32rem;border-radius:3px;font-size:.86em}
+  .swstrip{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1rem}
+  .sw{display:flex;align-items:center;gap:.36rem;font-family:ui-monospace,'SF Mono',monospace;font-size:.62rem;color:var(--muted);background:var(--card);border:1px solid var(--line);border-radius:3px;padding:.22rem .42rem .22rem .28rem}
+  .sw i{width:.9rem;height:.9rem;border-radius:2px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===================== MASTHEAD ===================== -->
+  <header>
+    <p class="kicker">Lodestar · Vesper · search study</p>
+    <h1 class="title">Make search <em>feel like the combobox</em></h1>
+    <p class="lede">
+      The five filter pills (<b>Status / Domain / Remote / Size / Stage</b>) are the polished
+      <code>Combobox</code>: type-to-filter with <b>tiered ranking</b> (prefix › substring › alias),
+      a <mark>gold</mark> highlight on the matched run, and keyboard nav. The free-text
+      <b>company search</b> next to them is, today, a plain <code>&lt;input&gt;</code> driving a flat
+      <code>.includes()</code> match over <code>name + domain + notes</code> — no ranking, no highlight,
+      no keyboard. This study shows <b>three directions</b> for closing that gap, each across its states
+      (resting · typing · no-match), so we can pick one. Demo query throughout: <span class="q" style="color:var(--accent-ink);font-weight:700">sec</span>.
+    </p>
+    <div class="rule"></div>
+  </header>
+
+  <!-- ===================== 0 · BASELINE ===================== -->
+  <section class="sec">
+    <div class="sechd"><span class="num">00</span><h2>Today — the baseline we're improving</h2></div>
+    <p class="secsub">The plain search sits in the header; results render inline below the polished filter
+      pills. Nothing is wrong here — it's just visibly <em>less</em> than the comboboxes beside it.</p>
+
+    <div class="stage">
+      <p class="caption">Companies · current</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <input class="companies__search" type="text" value="" placeholder="Search name, domain, notes…">
+          <button class="btn ghost">+ Add company</button>
+        </div>
+        <div class="tabs">
+          <button class="tab on">Queue <span class="tab__count">14 due</span></button>
+          <button class="tab">All</button>
+          <button class="tab">By domain</button>
+          <button class="tab">Best prospects</button>
+        </div>
+        <div class="companies__filters">
+          <div class="cbx"><button class="cbx-trigger is-any"><span class="lab"><span class="key">Status:&nbsp;</span><span class="val">any</span></span><span class="chev">⌄</span></button></div>
+          <div class="cbx"><button class="cbx-trigger is-any"><span class="lab"><span class="key">Domain:&nbsp;</span><span class="val">any</span></span><span class="chev">⌄</span></button></div>
+          <div class="cbx"><button class="cbx-trigger is-any"><span class="lab"><span class="key">Remote:&nbsp;</span><span class="val">any</span></span><span class="chev">⌄</span></button></div>
+          <div class="cbx"><button class="cbx-trigger is-any"><span class="lab"><span class="key">Size:&nbsp;</span><span class="val">any</span></span><span class="chev">⌄</span></button></div>
+          <div class="cbx"><button class="cbx-trigger is-any"><span class="lab"><span class="key">Stage:&nbsp;</span><span class="val">any</span></span><span class="chev">⌄</span></button></div>
+          <span class="sub">sorted by name A→Z</span>
+        </div>
+        <div class="thead"><span></span><span>Name</span><span>Domain</span><span>Size</span><span>Remote</span></div>
+        <ul class="clist">
+          <li><button class="crow"><span class="monogram">NU</span><span class="company-row__name">Numeric</span><span class="cmeta">Financial Services, AI</span><span class="cmeta">11–50</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">SA</span><span class="company-row__name">Sardine</span><span class="cmeta">Financial Services, Security</span><span class="cmeta">51–200</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">VS</span><span class="company-row__name">Vega Security</span><span class="cmeta">Security, AI</span><span class="cmeta">11–50</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">SO</span><span class="company-row__name">Sourcegraph</span><span class="cmeta">Developer Tools, AI</span><span class="cmeta">51–200</span><span class="cmeta">Remote</span></button></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== A · INLINE POLISH ===================== -->
+  <section class="sec">
+    <div class="sechd"><span class="num">A</span><h2>Inline polish</h2><span class="tag">filter · no new surface</span></div>
+    <p class="secsub">Search stays exactly where it is and keeps <em>filtering the inline list</em>. What changes:
+      results <b>rank by relevance</b> while you type, the matched run is highlighted <mark>gold</mark> in
+      whichever column matched, and a count tells you how many survived. Because each column is visible, the
+      highlight itself shows <em>why</em> a row matched — no extra hint needed (except for a notes-only match,
+      which gets a snippet). No popover, no keyboard nav.</p>
+
+    <div class="stage">
+      <p class="caption">A · typing — query “sec”</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <input class="companies__search" type="text" value="sec">
+          <button class="btn ghost">+ Add company</button>
+        </div>
+        <p class="filter-count"><b>3</b> companies match <span class="q">“sec”</span> — ranked by relevance</p>
+        <div class="thead"><span></span><span>Name</span><span>Domain</span><span>Size</span><span>Remote</span></div>
+        <ul class="clist">
+          <li><button class="crow"><span class="monogram">VS</span><span class="company-row__name">Vega <mark>Sec</mark>urity</span><span class="cmeta">Security, AI</span><span class="cmeta">11–50</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">CS</span><span class="company-row__name">Cogent <mark>Sec</mark>urity</span><span class="cmeta">Security, AI</span><span class="cmeta">17 ppl</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">SA</span><span class="company-row__name">Sardine</span><span class="cmeta">Financial Services, <mark>Sec</mark>urity</span><span class="cmeta">51–200</span><span class="cmeta">Remote</span></button></li>
+        </ul>
+      </div>
+      <ul class="splitnote">
+        <li><b>Vega Security / Cogent Security</b> — matched on <b>name</b> (gold run in the Name column); these rank first.</li>
+        <li><b>Sardine</b> — name has no “sec”; it surfaced because its <b>domain</b> is <span class="why">Security</span>. The gold mark lands in the Domain column, so the reason is self-evident.</li>
+        <li>A <b>notes-only</b> match (no visible column) would show a one-line snippet: <span class="reason" style="display:inline">…SOC2 / <mark>sec</mark>urity-first compliance…</span></li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <p class="caption">A · no matches</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <input class="companies__search" type="text" value="zzqx">
+          <button class="btn ghost">+ Add company</button>
+        </div>
+        <div class="empty-inline">
+          <div class="ico">∅</div>
+          <div class="ttl">No companies match <q>“zzqx”</q></div>
+          <div class="hint">Searched name, domain, and notes.</div>
+          <button class="clearbtn">↺ Clear search</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ann">
+      <span class="a"><b>+</b> Smallest change; reuses the existing list entirely</span>
+      <span class="a"><b>+</b> “Why it matched” is free in a table (highlight the matched column)</span>
+      <span class="a no"><b>—</b> No keyboard nav / Enter-to-open</span>
+    </div>
+  </section>
+
+  <!-- ===================== C · INLINE + KEYBOARD ===================== -->
+  <section class="sec">
+    <div class="sechd"><span class="num">C</span><h2>Inline + keyboard</h2><span class="tag rec">recommended</span></div>
+    <p class="secsub">Everything in A, <em>plus</em> the combobox's keyboard model brought to the inline list:
+      with focus in the search box, <kbd>↑↓</kbd> moves an <b>active row</b> (the same aubergine-soft wash + inset
+      ring the combobox uses for its active option), <kbd>↵</kbd> opens that company, <kbd>esc</kbd> clears. You get
+      the combobox's <em>two best qualities</em> — ranked-and-highlighted matches and keyboard-first navigation —
+      without a second surface to reconcile.</p>
+
+    <div class="stage">
+      <p class="caption">C · typing — query “sec”, second row keyboard-active</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <div class="search-wrap">
+            <input class="companies__search" type="text" value="sec">
+            <span class="kbdhint"><kbd>↑↓</kbd> move · <kbd>↵</kbd> open · <kbd>esc</kbd> clear</span>
+          </div>
+          <button class="btn ghost">+ Add company</button>
+        </div>
+        <p class="filter-count"><b>3</b> companies match <span class="q">“sec”</span> — ranked by relevance</p>
+        <div class="thead"><span></span><span>Name</span><span>Domain</span><span>Size</span><span>Remote</span></div>
+        <ul class="clist">
+          <li><button class="crow"><span class="monogram">VS</span><span class="company-row__name">Vega <mark>Sec</mark>urity</span><span class="cmeta">Security, AI</span><span class="cmeta">11–50</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow active"><span class="monogram">CS</span><span class="company-row__name">Cogent <mark>Sec</mark>urity</span><span class="cmeta">Security, AI</span><span class="cmeta">17 ppl</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">SA</span><span class="company-row__name">Sardine</span><span class="cmeta">Financial Services, <mark>Sec</mark>urity</span><span class="cmeta">51–200</span><span class="cmeta">Remote</span></button></li>
+        </ul>
+      </div>
+      <ul class="splitnote">
+        <li>The <b>active row</b> (Cogent Security) wears <code>--primary-soft</code> + the <code>--primary-ring</code> inset — pixel-identical to a combobox active option.</li>
+        <li><kbd>↵</kbd> navigates to that company's detail page; <kbd>esc</kbd> empties the search and drops the active row.</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <p class="caption">C · no matches</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <div class="search-wrap">
+            <input class="companies__search" type="text" value="zzqx">
+            <span class="kbdhint"><kbd>esc</kbd> clear</span>
+          </div>
+          <button class="btn ghost">+ Add company</button>
+        </div>
+        <div class="empty-inline">
+          <div class="ico">∅</div>
+          <div class="ttl">No companies match <q>“zzqx”</q></div>
+          <div class="hint">Searched name, domain, and notes.</div>
+          <button class="clearbtn">↺ Clear search</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ann">
+      <span class="a"><b>+</b> Combobox ranking + highlight <em>and</em> keyboard model</span>
+      <span class="a"><b>+</b> One surface — no popover to keep in sync with the list</span>
+      <span class="a no"><b>?</b> Open question: when searching, does the list go flat-ranked (ignoring tab grouping + sort)?</span>
+    </div>
+  </section>
+
+  <!-- ===================== B · TYPEAHEAD POPOVER ===================== -->
+  <section class="sec">
+    <div class="sechd"><span class="num">B</span><h2>Typeahead popover</h2><span class="tag">navigate · new surface</span></div>
+    <p class="secsub">The most literal port of the combobox: typing opens a <b>dropdown of matching companies</b>
+      under the search box — monogram, name, a sub-line, ranked, gold-highlighted, with the matched reason. <kbd>↑↓</kbd>
+      moves the active row, <kbd>↵</kbd> <b>opens</b> that company. It reads as a command-palette / quick-jump. The
+      tension: this is <em>navigate</em>, not <em>filter</em>, and it adds a second result surface on top of the inline
+      list — we'd have to decide how the two relate (does the list also filter? does the popover replace it?).</p>
+
+    <div class="stage">
+      <p class="caption">B · open — query “sec”, first row active</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <div class="search-wrap">
+            <input class="companies__search" type="text" value="sec" style="position:relative;z-index:1">
+            <!-- popover -->
+            <div class="jump-pop">
+              <ul class="jump-list">
+                <li class="jump-opt active">
+                  <span class="monogram">VS</span>
+                  <span><span class="jname">Vega <mark>Sec</mark>urity</span><span class="jsub">Security · AI · Remote</span></span>
+                  <span class="enter">open ↵</span>
+                </li>
+                <li class="jump-opt">
+                  <span class="monogram">CS</span>
+                  <span><span class="jname">Cogent <mark>Sec</mark>urity</span><span class="jsub">Security · AI · Remote</span></span>
+                  <span class="enter">open ↵</span>
+                </li>
+                <li class="jump-opt">
+                  <span class="monogram">SA</span>
+                  <span><span class="jname">Sardine</span><span class="jsub">Financial Services · Remote <span class="why">· matches domain <mark>Sec</mark>urity</span></span></span>
+                  <span class="enter">open ↵</span>
+                </li>
+              </ul>
+              <div class="jump-foot"><b>3</b>&nbsp;of 179 companies<span class="spacer"></span>↑↓ move · ↵ open · esc close</div>
+            </div>
+          </div>
+          <button class="btn ghost">+ Add company</button>
+        </div>
+        <div class="thead" style="opacity:.4"><span></span><span>Name</span><span>Domain</span><span>Size</span><span>Remote</span></div>
+        <ul class="clist" style="opacity:.4">
+          <li><button class="crow"><span class="monogram">NU</span><span class="company-row__name">Numeric</span><span class="cmeta">Financial Services, AI</span><span class="cmeta">11–50</span><span class="cmeta">Remote</span></button></li>
+          <li><button class="crow"><span class="monogram">SA</span><span class="company-row__name">Sardine</span><span class="cmeta">Financial Services, Security</span><span class="cmeta">51–200</span><span class="cmeta">Remote</span></button></li>
+        </ul>
+      </div>
+      <ul class="splitnote">
+        <li>The popover floats over the inline list (shown dimmed). <b>That's the core question for B:</b> does the list keep filtering underneath, freeze, or disappear while the popover is open?</li>
+        <li>Selecting a row <b>navigates</b> to its detail page — unlike the filter pills, which set a value and stay put.</li>
+        <li><b>Sardine</b> shows the combobox's alias-hint pattern verbatim: <span class="why" style="color:var(--faint)">· matches domain <mark>Security</mark></span>.</li>
+      </ul>
+    </div>
+
+    <div class="stage">
+      <p class="caption">B · no matches</p>
+      <div class="app">
+        <div class="companies__header">
+          <h1>Companies <span class="companies__count">179</span></h1>
+          <div class="search-wrap">
+            <input class="companies__search" type="text" value="zzqx" style="position:relative;z-index:1">
+            <div class="jump-pop">
+              <div class="empty-inline" style="padding:1.3rem 1rem">
+                <div class="ico">∅</div>
+                <div class="ttl">No companies match <q>“zzqx”</q></div>
+                <div class="hint">Searched name, domain, and notes.</div>
+                <button class="clearbtn">↺ Clear search</button>
+              </div>
+            </div>
+          </div>
+          <button class="btn ghost">+ Add company</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ann">
+      <span class="a"><b>+</b> Fastest “jump straight to a company” path</span>
+      <span class="a"><b>+</b> Closest 1:1 to the combobox interaction</span>
+      <span class="a no"><b>—</b> Second surface to reconcile with the inline list</span>
+      <span class="a no"><b>—</b> Navigate, not filter — arguably a different feature</span>
+    </div>
+  </section>
+
+  <!-- ===================== THE DECISION ===================== -->
+  <section class="sec">
+    <div class="sechd"><span class="num">★</span><h2>The decision</h2></div>
+    <p class="secsub">The directions nest: <b>A ⊂ C</b> (C is A plus the keyboard model), while <b>B</b> is the
+      orthogonal “new popover surface” choice. So the call is really two questions: <em>(1) inline or popover?</em>
+      and, if inline, <em>(2) with keyboard nav or without?</em></p>
+
+    <div class="stage">
+      <table class="cmp">
+        <thead>
+          <tr><th>&nbsp;</th><th>A · Inline polish</th><th class="col-rec">C · Inline + keyboard</th><th>B · Typeahead popover</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>Result surface</th><td>existing list</td><td class="col-rec">existing list</td><td>new popover (2nd surface)</td></tr>
+          <tr><th>Tiered ranking</th><td class="yes">✓</td><td class="col-rec yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th>Gold match highlight</th><td class="yes">✓</td><td class="col-rec yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th>“Why it matched”</th><td>matched column / snippet</td><td class="col-rec">matched column / snippet</td><td>reason hint line</td></tr>
+          <tr><th>Keyboard nav (↑↓)</th><td class="no">—</td><td class="col-rec yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th>↵ opens a company</th><td class="no">—</td><td class="col-rec yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th>Semantics</th><td>filter</td><td class="col-rec">filter + open</td><td>navigate (jump)</td></tr>
+          <tr><th>Build effort</th><td>low</td><td class="col-rec">medium</td><td>high</td></tr>
+          <tr><th>Main risk</th><td>least “combobox-y”</td><td class="col-rec">ranking-vs-sort question</td><td>two surfaces to reconcile</td></tr>
+        </tbody>
+      </table>
+      <p class="footnote" style="margin-top:1.2rem">
+        <b>My recommendation: C.</b> It delivers the two things that make the combobox's type-to-filter feel good —
+        <em>relevance-ranked, highlighted matches</em> and a <em>keyboard-first</em> rhythm — while staying a single
+        surface that reuses the list we already have. A is a clean fallback if keyboard nav feels like scope creep
+        (and C degrades to A gracefully). B's quick-jump is genuinely nice, but it's a <em>command-palette</em> —
+        a different, navigate-first feature — and I'd rather propose it later as its own thing (maybe a global
+        <code>⌘K</code>) than bolt a second result surface onto this page now.
+      </p>
+      <p class="footnote">
+        <b>One open question either way (flagged on C):</b> while a query is active, should the list collapse to a
+        single <em>flat, relevance-ranked</em> result set — ignoring the Queue/By-domain grouping and the chosen
+        sort? Ranking is meaningless <em>inside</em> a domain group, so I lean yes: searching enters a temporary
+        “results mode,” and clearing the query restores the tab's normal grouping/sort. Worth deciding before we plan.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== TOKENS ===================== -->
+  <section class="sec">
+    <div class="sechd"><span class="num">·</span><h2>Tokens in play</h2></div>
+    <div class="swstrip">
+      <span class="sw"><i style="background:#fdf9f5"></i>card</span>
+      <span class="sw"><i style="background:#f5ece6"></i>card-hover</span>
+      <span class="sw"><i style="background:#f6ebed"></i>panel-head</span>
+      <span class="sw"><i style="background:#dcc7cd"></i>wire</span>
+      <span class="sw"><i style="background:#ebdde1"></i>line</span>
+      <span class="sw"><i style="background:#7d2348"></i>primary</span>
+      <span class="sw"><i style="background:#f3dbe4"></i>primary-soft</span>
+      <span class="sw"><i style="background:#b58320"></i>accent</span>
+      <span class="sw"><i style="background:#f4e7c5"></i>accent-soft</span>
+      <span class="sw"><i style="background:#8a6110"></i>accent-ink</span>
+      <span class="sw"><i style="background:#291d24"></i>ink</span>
+      <span class="sw"><i style="background:#75606c"></i>muted</span>
+      <span class="sw"><i style="background:#a890a0"></i>faint</span>
+    </div>
+    <p class="footnote">
+      No new tokens. The match highlight reuses <code>--accent-soft / --accent-ink</code> (the combobox's gold
+      <code>&lt;mark&gt;</code>); the active row reuses <code>--primary-soft</code> + <code>--primary-ring</code>
+      (the combobox's active-option wash). Squared corners (<code>--r-*: 0</code>), Bodoni company names, Spline
+      Sans UI — all per the live app.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar — theme directions (v3)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Display: Fraunces (opsz/SOFT/WONK), Gloock, Bodoni Moda · Body: Newsreader, Lora, Source Serif 4 · UI: Hanken Grotesk, Outfit, Spline Sans -->
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT,WONK@0,9..144,400..900,0..100,0..1;1,9..144,400..900,0..100,0..1&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Hanken+Grotesk:wght@400;500;600;700;800&family=Gloock&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Outfit:wght@400;500;600;700&family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,600;6..96,700;6..96,800&family=Lora:wght@400;500;600&family=Spline+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<style>
+  *{box-sizing:border-box}
+  :root{
+    --pageink:#241f1b; --pagemuted:#6a5f55; --pagebg:#e7e0d4; --pagebg2:#ddd4c4;
+    --pagecard:#fbf7ef; --pageline:#cfc4b1;
+  }
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;color:var(--pageink);line-height:1.55;
+    font-family:'Hanken Grotesk',-apple-system,system-ui,sans-serif;
+    background:
+      radial-gradient(120% 80% at 12% -8%, #f0e9da 0%, rgba(240,233,218,0) 55%),
+      radial-gradient(120% 90% at 100% 0%, #e9dfcb 0%, rgba(233,223,203,0) 50%),
+      linear-gradient(180deg,#e9e2d6 0%, #e2d9ca 100%);
+    background-attachment:fixed;
+    padding:2.4rem 1.25rem 6rem;
+  }
+  .wrap{max-width:1120px;margin:0 auto}
+
+  /* -------- page masthead -------- */
+  .masthead{position:relative;margin-bottom:2.2rem}
+  .kicker{font-size:.7rem;font-weight:700;letter-spacing:.34em;text-transform:uppercase;color:#a8845f;margin:0 0 .55rem}
+  .masthead h1{
+    font-family:'Fraunces',serif;
+    font-variation-settings:'opsz' 144,'wght' 600,'SOFT' 0,'WONK' 1;
+    font-size:clamp(2.5rem,6vw,3.9rem);line-height:.96;margin:0;letter-spacing:-.012em;color:#221d18;
+  }
+  .masthead h1 em{font-style:italic;font-variation-settings:'opsz' 144,'wght' 500,'SOFT' 60,'WONK' 1;color:#9c4a23}
+  .lede{color:var(--pagemuted);max-width:74ch;margin:1rem 0 0;font-size:.96rem}
+  .lede code{background:#d9cfbd;padding:.05rem .34rem;border-radius:5px;font-size:.86em}
+  .rule{height:1px;background:linear-gradient(90deg,#b6a589 0%,rgba(182,165,137,0) 80%);margin:1.4rem 0 0}
+
+  /* -------- global color-role legend -------- */
+  .roles{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.1rem;
+    background:var(--pagecard);border:1px solid var(--pageline);border-radius:14px;
+    margin:1.8rem 0 2.4rem;overflow:hidden;box-shadow:0 12px 30px -18px rgba(60,40,20,.4)
+  }
+  .roles .rhead{grid-column:1/-1;display:flex;align-items:baseline;gap:.6rem;padding:.85rem 1.1rem .2rem}
+  .roles .rhead b{font-family:'Fraunces',serif;font-variation-settings:'opsz' 40,'wght' 600,'SOFT' 0;font-size:1.05rem}
+  .roles .rhead span{font-size:.8rem;color:var(--pagemuted)}
+  .role{display:flex;gap:.7rem;align-items:flex-start;padding:.7rem 1.1rem 1rem}
+  .role .dot{width:1.6rem;height:1.6rem;border-radius:7px;flex:none;margin-top:.1rem;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+  .role .rl{font-weight:700;font-size:.82rem;letter-spacing:.01em;display:flex;align-items:baseline;gap:.45rem}
+  .role .rl .hex{font-family:ui-monospace,'SF Mono',monospace;font-size:.68rem;font-weight:500;color:var(--pagemuted)}
+  .role .rd{font-size:.76rem;color:var(--pagemuted);margin-top:.12rem;line-height:1.4}
+
+  /* ================= shared slice — FIXED sizing; only palette + 3 fonts vary ================= */
+  .opt{margin-bottom:2.6rem;border-radius:18px;overflow:hidden;
+    box-shadow:0 30px 60px -34px rgba(50,30,15,.55), 0 2px 0 rgba(255,255,255,.5) inset;
+    border:1px solid var(--pageline);background:var(--pagecard)}
+  .opt-head{display:flex;align-items:flex-start;gap:1rem;padding:1.05rem 1.2rem .95rem;border-bottom:1px solid var(--pageline);
+    background:linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0))}
+  .opt-head .badge-letter{
+    font-family:'Fraunces',serif;font-variation-settings:'opsz' 144,'wght' 700,'SOFT' 0,'WONK' 1;
+    font-size:2.4rem;line-height:.8;width:2.7rem;height:2.7rem;border-radius:13px;flex:none;
+    display:grid;place-items:center;color:#fff;letter-spacing:-.03em}
+  .opt-head .ttl{flex:1;min-width:0}
+  .opt-head .nm{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap}
+  .opt-head .nm h2{font-family:'Fraunces',serif;font-variation-settings:'opsz' 60,'wght' 600,'SOFT' 0;font-size:1.5rem;margin:0;letter-spacing:-.01em;color:#221d18}
+  .opt-head .nm .mood{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:#a8845f;font-weight:700}
+  .opt-head .type{color:var(--pagemuted);font-size:.82rem;margin-top:.4rem;line-height:1.5}
+  .opt-head .type b{color:#3b332b;font-weight:700}
+  .opt-head .type .f{font-style:normal}
+
+  /* the actual product slice */
+  .app{display:grid;grid-template-columns:11rem 1fr;min-height:24rem;font-family:var(--ui);background:var(--bg)}
+  .rail{background:var(--rail);color:var(--rail-ink);padding:.7rem .55rem;font-size:.82rem;position:relative;
+    background-image:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.12))}
+  .brand{color:#fff;font-weight:700;padding:.25rem .55rem .85rem;display:flex;align-items:center;gap:.5rem;
+    font-family:var(--display)}
+  .brand .star{color:var(--primary);font-size:1rem}
+  .brand .bword{font-family:var(--display);font-size:1.18rem;letter-spacing:.005em;line-height:1}
+  .nav a{display:flex;align-items:center;gap:.6rem;padding:.4rem .55rem;border-radius:8px;color:var(--rail-ink);
+    text-decoration:none;margin-bottom:.12rem;font-size:.82rem;font-weight:500;cursor:pointer;transition:background .12s}
+  .nav a i{width:1.05rem;text-align:center;font-size:.86rem;opacity:.85}
+  .nav a:hover{background:var(--rail-hover)}
+  .nav a.on{background:var(--rail-active);color:#fff;font-weight:600;box-shadow:inset 3px 0 0 var(--primary)}
+  .nav a.on i{opacity:1;color:var(--primary-on-rail)}
+  .nav a.future{color:var(--rail-muted)}
+  .rsep{height:1px;background:var(--rail-sep);margin:.6rem .45rem}
+  .util{font-size:.62rem;text-transform:uppercase;letter-spacing:.13em;color:var(--rail-muted);padding:.35rem .55rem .15rem;font-weight:700}
+
+  .content{background:var(--card);padding:1rem 1.2rem 1.2rem;min-width:0}
+  .mhead{display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem}
+  .mhead h2{font-family:var(--display);font-size:var(--h2-size);margin:0;color:var(--ink);font-weight:var(--h2-weight);letter-spacing:var(--h2-track);line-height:1;font-variation-settings:var(--h2-vf)}
+  .mhead .count{color:#fff;background:var(--accent);font-size:.74rem;font-family:var(--ui);font-weight:700;border-radius:99px;padding:.12rem .5rem;letter-spacing:.01em;align-self:center}
+  .search{flex:1;display:flex;align-items:center;gap:.45rem;border:1px solid var(--wire);border-radius:9px;
+    padding:.4rem .65rem;color:var(--faint);font-size:.82rem;background:var(--card);min-width:6rem}
+  .search i{font-size:.78rem}
+  .btn{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--wire);border-radius:9px;padding:.4rem .7rem;
+    background:var(--card);color:var(--ink);font-family:var(--ui);font-size:.8rem;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .12s}
+  .btn i{font-size:.78rem}
+  .btn.ghost{border-style:dashed;color:var(--muted);background:transparent}
+  .btn.ghost:hover{color:var(--ink);border-color:var(--muted)}
+  .btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600;
+    box-shadow:0 1px 2px rgba(0,0,0,.12), 0 6px 14px -8px var(--primary-shadow)}
+  .btn.primary:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
+  .btn.sm{padding:.26rem .55rem;font-size:.72rem;border-radius:7px}
+  .btn.danger{color:var(--danger);border-color:var(--danger-border);background:var(--card)}
+  .tabs{display:flex;gap:.35rem;border-bottom:1px solid var(--line);margin-bottom:.6rem}
+  .tab{font-size:.82rem;padding:.4rem .6rem;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;font-weight:500}
+  .tab:hover{color:var(--ink)}
+  .tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
+  .tab .c{font-size:.72rem;color:var(--accent);font-weight:700}
+  .secthdr{display:flex;align-items:center;gap:.5rem;padding:.55rem .15rem .45rem;color:var(--ink-soft);font-weight:700;font-size:.82rem}
+  .secthdr .badge{background:var(--flat-soft);border-radius:99px;padding:.05rem .5rem;font-size:.7rem;color:var(--muted);font-weight:700}
+  .grow{flex:1}
+  .qrow{display:grid;grid-template-columns:2rem 1fr auto auto;gap:.65rem;align-items:center;padding:.6rem .2rem;border-bottom:1px solid var(--line)}
+  .qrow:hover{background:var(--card-hover)}
+  .mono{width:2rem;height:2rem;border-radius:8px;background:var(--mono-bg);display:grid;place-items:center;
+    font-size:.66rem;font-weight:800;color:var(--mono-ink);font-family:var(--ui);letter-spacing:.02em}
+  .nm-co{font-family:var(--display);font-weight:var(--co-weight);color:var(--ink);font-size:var(--co-size);line-height:1.05;font-variation-settings:var(--co-vf);display:flex;align-items:baseline;gap:.45rem;flex-wrap:wrap}
+  .meta{color:var(--muted);font-size:.75rem;margin-top:.12rem}
+  .chip{font-size:.66rem;border-radius:99px;padding:.1rem .48rem;background:var(--flat-soft);color:var(--muted);font-weight:600;white-space:nowrap}
+  .chip.tag{font-size:.6rem;letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+  .chip.good{background:var(--good-soft);color:var(--good)}
+  .chip.warn{background:var(--warn-soft);color:var(--warn)}
+  .chip.danger{background:var(--danger-soft);color:var(--danger)}
+  .chip.accent{background:var(--accent-soft);color:var(--accent-ink)}
+  .sub{color:var(--faint);font-size:.74rem;white-space:nowrap}
+  .panel{border:1px solid var(--line);border-radius:11px;margin-top:.85rem;overflow:hidden;background:var(--card)}
+  .ph{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;background:var(--panel-head);border-bottom:1px solid var(--line);
+    font-weight:700;font-size:.78rem;color:var(--ink);font-family:var(--ui)}
+  .ph .sub{margin-left:auto;font-weight:500}
+  .pb{padding:.7rem .8rem;color:var(--ink-soft);font-size:.92rem;font-family:var(--body);line-height:1.6}
+  .pb b{color:var(--ink);font-weight:600}
+  .states{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.9rem;font-size:.74rem;color:var(--muted)}
+  .states .lbl{font-weight:700;color:var(--ink-soft)}
+
+  /* -------- per-option swatch strip + token table -------- */
+  .meta-foot{padding:1rem 1.2rem 1.25rem;border-top:1px solid var(--pageline);background:linear-gradient(180deg, rgba(255,255,255,.4), rgba(255,255,255,0))}
+  .strip{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.95rem}
+  .sw{display:flex;align-items:center;gap:.38rem;font-size:.66rem;color:#5d5247;font-family:ui-monospace,'SF Mono',monospace;
+    background:#fff;border:1px solid var(--pageline);border-radius:7px;padding:.22rem .42rem .22rem .28rem}
+  .sw i{width:.95rem;height:.95rem;border-radius:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+  details.tok{border:1px solid var(--pageline);border-radius:10px;background:#fff;overflow:hidden}
+  details.tok summary{cursor:pointer;list-style:none;padding:.55rem .8rem;font-size:.78rem;font-weight:700;color:#473e34;
+    display:flex;align-items:center;gap:.5rem;background:#f6f0e4}
+  details.tok summary::-webkit-details-marker{display:none}
+  details.tok summary .chev{transition:transform .15s;color:#a8845f}
+  details.tok[open] summary .chev{transform:rotate(90deg)}
+  .tok table{width:100%;border-collapse:collapse;font-size:.72rem;font-family:ui-monospace,'SF Mono',monospace}
+  .tok td{padding:.3rem .8rem;border-bottom:1px solid #f0e9da;vertical-align:middle}
+  .tok tr:last-child td{border-bottom:none}
+  .tok .vname{color:#7a6e5f;white-space:nowrap}
+  .tok .vval{color:#332c24;font-weight:600}
+  .tok .vc{width:1rem;height:1rem;border-radius:4px;display:inline-block;vertical-align:-.18rem;margin-right:.45rem;box-shadow:inset 0 0 0 1px rgba(0,0,0,.14)}
+  .tok .grp td{background:#faf5ea;color:#9c7a52;font-weight:700;letter-spacing:.05em;text-transform:uppercase;font-size:.62rem;font-family:'Hanken Grotesk',sans-serif}
+  .tok .fontrow td{font-family:'Hanken Grotesk',sans-serif;font-size:.74rem}
+
+  /* ---------- icon audit + recommendation cards ---------- */
+  .card{background:var(--pagecard);border:1px solid var(--pageline);border-radius:16px;padding:1.4rem 1.4rem 1.5rem;
+    box-shadow:0 16px 40px -26px rgba(60,40,20,.5);margin-bottom:1.8rem}
+  .card h2{font-family:'Fraunces',serif;font-variation-settings:'opsz' 60,'wght' 600,'SOFT' 0;font-size:1.6rem;margin:0 0 .25rem;letter-spacing:-.01em}
+  .card p{color:var(--pagemuted);font-size:.9rem;margin:.2rem 0 0;max-width:80ch}
+  .auditgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:.5rem;margin:1.1rem 0 .4rem}
+  .ai{display:flex;align-items:center;gap:.6rem;border:1px solid var(--pageline);border-radius:9px;padding:.5rem .65rem;background:#fff;font-size:.8rem}
+  .ai i{width:1.4rem;text-align:center;font-size:1rem;color:#7a4a24}
+  .ai .ok{color:#4d7c3a}
+  .ai .miss{color:#b23a2e}
+  .ai .lab{font-weight:600;color:#332c24}
+  .ai .sm{display:block;font-size:.66rem;color:#8a7d6c;font-family:ui-monospace,monospace}
+  .gap{border-color:#e6c4a0;background:#fdf3e6}
+  .legendline{display:flex;gap:1.4rem;flex-wrap:wrap;font-size:.76rem;color:var(--pagemuted);margin-top:.9rem}
+  .legendline b{color:#332c24}
+  .rec{border-left:4px solid #9c4a23;padding-left:1rem;margin-top:1.1rem}
+  .rec b{color:#9c4a23}
+
+  /* ============================================================
+     OPTION A — "Ember & Sage"   warm editorial
+     primary burnt orange · accent sage green · danger true crimson
+     Display Fraunces (heavy opsz, soft) · Body Newsreader · UI Hanken Grotesk
+     ============================================================ */
+  .opt-a{
+    --display:'Fraunces',serif; --body:'Newsreader',serif; --ui:'Hanken Grotesk',sans-serif;
+    --h2-size:1.55rem; --h2-weight:600; --h2-track:-.01em; --h2-vf:'opsz' 60,'wght' 600,'SOFT' 0,'WONK' 0;
+    --co-size:1.02rem; --co-weight:600; --co-vf:'opsz' 24,'wght' 600,'SOFT' 30,'WONK' 1;
+    --bg:#f6efe2; --card:#fffdf7; --card-hover:#faf3e6; --rail:#2a2118;
+    --rail-ink:#c3b298; --rail-hover:#392d20; --rail-active:#3c2f21; --rail-muted:#897759; --rail-sep:#3d3022;
+    --ink:#2b2218; --ink-soft:#4d4133; --muted:#766850; --faint:#a4937a; --line:#ece0cd; --wire:#dccdb3;
+    --primary:#bb4d22; --primary-hover:#a3401a; --primary-on-rail:#e0894f; --primary-shadow:rgba(187,77,34,.5);
+    --accent:#5b7a3f; --accent-ink:#3e5a28; --accent-soft:#e7eed8;
+    --good:#3f7d4e; --good-soft:#dcefdf;
+    --warn:#9a6310; --warn-soft:#f7e8c8;
+    --danger:#bc2b2b; --danger-soft:#f8dada; --danger-border:#e9b3b3;
+    --flat-soft:#efe6d4; --panel-head:#f7f0e2; --mono-bg:#ece0cc; --mono-ink:#7a6a4f;
+  }
+  /* ============================================================
+     OPTION B — "Atlas"   cool petrol + warm marigold (nautical/lodestar)
+     primary deep teal-petrol · accent marigold · danger vermilion red
+     Display Gloock (fat didone) · Body Source Serif 4 · UI Outfit
+     ============================================================ */
+  .opt-b{
+    --display:'Gloock',serif; --body:'Source Serif 4',serif; --ui:'Outfit',sans-serif;
+    --h2-size:1.5rem; --h2-weight:400; --h2-track:.004em; --h2-vf:normal;
+    --co-size:1.04rem; --co-weight:400; --co-vf:normal;
+    --bg:#f1ece1; --card:#fcfaf4; --card-hover:#f3efe5; --rail:#13252a;
+    --rail-ink:#9fb3b3; --rail-hover:#1c3238; --rail-active:#214049; --rail-muted:#5e7a7d; --rail-sep:#234047;
+    --ink:#1b2a2c; --ink-soft:#39494a; --muted:#5f6f6b; --faint:#9aa39a; --line:#e3ddcf; --wire:#cdc6b4;
+    --primary:#136a6f; --primary-hover:#0e565a; --primary-on-rail:#39b1a8; --primary-shadow:rgba(19,106,111,.5);
+    --accent:#c98a16; --accent-ink:#9a6608; --accent-soft:#f6e7c4;
+    --good:#2f7d57; --good-soft:#d7eede;
+    --warn:#b06a0d; --warn-soft:#f7e6c6;
+    --danger:#cf3520; --danger-soft:#fadcd5; --danger-border:#eeb6a9;
+    --flat-soft:#e9e3d4; --panel-head:#f3eee1; --mono-bg:#dfe6df; --mono-ink:#4f6a64;
+  }
+  /* ============================================================
+     OPTION C — "Vesper"   dusky plum + warm gold (evening / luxe)
+     primary aubergine-wine · accent antique gold · danger brick scarlet
+     Display Bodoni Moda (dramatic didone) · Body Lora · UI Spline Sans
+     ============================================================ */
+  .opt-c{
+    --display:'Bodoni Moda',serif; --body:'Lora',serif; --ui:'Spline Sans',sans-serif;
+    --h2-size:1.5rem; --h2-weight:600; --h2-track:.002em; --h2-vf:'opsz' 60;
+    --co-size:1.04rem; --co-weight:600; --co-vf:'opsz' 11;
+    --bg:#f1e9e4; --card:#fdf9f5; --card-hover:#f5ece6; --rail:#241921;
+    --rail-ink:#bca7b3; --rail-hover:#33232f; --rail-active:#3a2834; --rail-muted:#856f7d; --rail-sep:#382734;
+    --ink:#291d24; --ink-soft:#4b3a45; --muted:#75606c; --faint:#a890a0; --line:#ebdde1; --wire:#dcc7cd;
+    --primary:#7d2348; --primary-hover:#691838; --primary-on-rail:#c06088; --primary-shadow:rgba(125,35,72,.5);
+    --accent:#b58320; --accent-ink:#8a6110; --accent-soft:#f4e7c5;
+    --good:#3c7a52; --good-soft:#daecdf;
+    --warn:#a76a16; --warn-soft:#f5e6c8;
+    --danger:#c23320; --danger-soft:#f7d9d3; --danger-border:#ecb3a8;
+    --flat-soft:#efe1e3; --panel-head:#f6ebed; --mono-bg:#ecdde0; --mono-ink:#7a6470;
+  }
+  @media(max-width:680px){.app{grid-template-columns:1fr}.rail .nav{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header class="masthead">
+    <p class="kicker">Lodestar · brand &amp; theme study</p>
+    <h1>Three warm <em>directions</em> to choose from</h1>
+    <p class="lede">
+      The same <b>Companies</b> slice rendered three ways. <b>Sizing is fixed across all three</b> — type scale, icon size,
+      button padding and layout are identical — so the only variables are <b>palette</b> and <b>type</b>, making this a fair
+      side-by-side. Each direction runs a <b>two-colour system</b>: a dominant <b>primary</b> for brand + actions and a clearly
+      <em>different-hue</em> <b>accent</b> for things that should stand out (counts, selected tabs, key affordances). Semantics
+      (<b>good / warn / danger</b>) are tuned to read unambiguously and never as siblings of the primary. Three OFL type tiers each:
+      an ornamental <b>display</b>, a legibility-first <b>body</b>, and a clean <b>UI sans</b>. Icons are real
+      <b>FontAwesome Solid (free)</b> via CDN; in the app they'll ship through the FA <code>library</code> package, not inline SVG.
+    </p>
+    <div class="rule"></div>
+  </header>
+
+  <!-- ============ GLOBAL COLOR-ROLE LEGEND ============ -->
+  <section class="roles">
+    <div class="rhead"><b>The five colour roles</b><span>every direction maps onto these — the hexes below are Direction A's; B and C re-tune the same roles</span></div>
+    <div class="role"><span class="dot" style="background:#bb4d22"></span><div>
+      <div class="rl">Primary <span class="hex">#bb4d22</span></div>
+      <div class="rd">Dominant brand colour. Primary buttons, active-nav marker, selected tab underline, the logo star.</div></div></div>
+    <div class="role"><span class="dot" style="background:#5b7a3f"></span><div>
+      <div class="rl">Accent <span class="hex">#5b7a3f</span></div>
+      <div class="rd">A <em>different hue</em> from the primary, never a tint of it. Used sparingly to make one thing pop — the queue count, a tab's "due" number.</div></div></div>
+    <div class="role"><span class="dot" style="background:#3f7d4e"></span><div>
+      <div class="rl">Good <span class="hex">#3f7d4e</span></div>
+      <div class="rd">Success / clear. "No flags", a passing check. Reads as calm green, distinct from the sage accent.</div></div></div>
+    <div class="role"><span class="dot" style="background:#9a6310"></span><div>
+      <div class="rl">Warn <span class="hex">#9a6310</span></div>
+      <div class="rd">Caution / due-soon / partial. Amber-bronze — warm but unmistakably "slow down", not an action colour.</div></div></div>
+    <div class="role"><span class="dot" style="background:#bc2b2b"></span><div>
+      <div class="rl">Danger <span class="hex">#bc2b2b</span></div>
+      <div class="rd">Destructive / error / dealbreaker. A true cool-leaning crimson — deliberately <em>not</em> a sibling of the warm primary.</div></div></div>
+  </section>
+
+  <!-- =================================================================
+       OPTION A — EMBER & SAGE
+       ================================================================= -->
+  <section class="opt opt-a">
+    <div class="opt-head">
+      <div class="badge-letter" style="background:#bb4d22">A</div>
+      <div class="ttl">
+        <div class="nm"><h2>Ember &amp; Sage</h2><span class="mood">warm · editorial · confident</span></div>
+        <div class="type">
+          <span class="f">Display <b>Fraunces</b> (soft, high-opsz — set with real weight &amp; warmth)</span> ·
+          <span class="f">Body <b>Newsreader</b> (literary serif)</span> ·
+          <span class="f">UI <b>Hanken Grotesk</b> (humanist sans)</span> — burnt-orange primary, sage-green accent on warm paper.
+        </div>
+      </div>
+    </div>
+
+    <div class="app">
+      <nav class="rail">
+        <div class="brand"><i class="fa-solid fa-compass star"></i><span class="bword">Lodestar</span></div>
+        <a class="future"><i class="fa-solid fa-sun"></i> Today</a>
+        <a class="future"><i class="fa-solid fa-layer-group"></i> Triage</a>
+        <a class="future"><i class="fa-solid fa-diagram-project"></i> Pipeline</a>
+        <a class="on"><i class="fa-solid fa-building"></i> Companies</a>
+        <a class="future"><i class="fa-solid fa-user-group"></i> Network</a>
+        <a class="future"><i class="fa-solid fa-chart-line"></i> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><i class="fa-solid fa-heart-pulse"></i> Checks</a>
+      </nav>
+      <div class="content">
+        <div class="mhead">
+          <h2>Companies</h2><span class="count">179</span>
+          <span class="search"><i class="fa-solid fa-magnifying-glass"></i> Search name, industry, notes…</span>
+          <span class="btn ghost"><i class="fa-solid fa-plus"></i> Add company</span>
+        </div>
+        <div class="tabs">
+          <span class="tab on">Queue <span class="c">179 due</span></span>
+          <span class="tab">All</span>
+          <span class="tab">By domain</span>
+          <span class="tab">Best prospects</span>
+        </div>
+        <div class="secthdr">Never fetched <span class="badge">179</span><span class="grow"></span>
+          <span class="btn primary sm"><i class="fa-solid fa-arrows-rotate"></i> Fetch all due</span></div>
+        <div class="qrow">
+          <span class="mono">St</span>
+          <div><div class="nm-co">Stripe</div><div class="meta">Financial Services · Enterprise · Remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary sm">Fetch jobs <i class="fa-solid fa-arrow-right"></i></span>
+        </div>
+        <div class="qrow">
+          <span class="mono">1P</span>
+          <div><div class="nm-co">1Password <span class="chip tag accent">B2B</span></div><div class="meta">Security · Scaleup · Remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary sm">Fetch jobs <i class="fa-solid fa-arrow-right"></i></span>
+        </div>
+        <div class="panel">
+          <div class="ph"><i class="fa-solid fa-note-sticky"></i> Notes <span class="sub">rendered markdown</span></div>
+          <div class="pb"><b>Why listed.</b> Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure, top-of-market comp (senior eng $250k+ total).</div>
+        </div>
+        <div class="states"><span class="lbl">States:</span>
+          <span class="chip good"><i class="fa-solid fa-circle-check"></i> no flags</span>
+          <span class="chip warn"><i class="fa-solid fa-triangle-exclamation"></i> caution</span>
+          <span class="chip danger"><i class="fa-solid fa-ban"></i> dealbreaker</span></div>
+      </div>
+    </div>
+
+    <div class="meta-foot">
+      <div class="strip">
+        <span class="sw"><i style="background:#f6efe2"></i>bg</span>
+        <span class="sw"><i style="background:#fffdf7"></i>card</span>
+        <span class="sw"><i style="background:#2a2118"></i>rail</span>
+        <span class="sw"><i style="background:#bb4d22"></i>primary</span>
+        <span class="sw"><i style="background:#5b7a3f"></i>accent</span>
+        <span class="sw"><i style="background:#3f7d4e"></i>good</span>
+        <span class="sw"><i style="background:#9a6310"></i>warn</span>
+        <span class="sw"><i style="background:#bc2b2b"></i>danger</span>
+        <span class="sw"><i style="background:#2b2218"></i>ink</span>
+      </div>
+      <details class="tok">
+        <summary><i class="fa-solid fa-chevron-right chev"></i> tokens.css for Ember &amp; Sage</summary>
+        <table>
+          <tr class="grp"><td colspan="2">surfaces</td></tr>
+          <tr><td class="vname">--bg</td><td class="vval"><span class="vc" style="background:#f6efe2"></span>#f6efe2</td></tr>
+          <tr><td class="vname">--card</td><td class="vval"><span class="vc" style="background:#fffdf7"></span>#fffdf7</td></tr>
+          <tr><td class="vname">--panel-head</td><td class="vval"><span class="vc" style="background:#f7f0e2"></span>#f7f0e2</td></tr>
+          <tr class="grp"><td colspan="2">rail</td></tr>
+          <tr><td class="vname">--rail</td><td class="vval"><span class="vc" style="background:#2a2118"></span>#2a2118</td></tr>
+          <tr class="grp"><td colspan="2">text</td></tr>
+          <tr><td class="vname">--ink</td><td class="vval"><span class="vc" style="background:#2b2218"></span>#2b2218</td></tr>
+          <tr><td class="vname">--ink-soft</td><td class="vval"><span class="vc" style="background:#4d4133"></span>#4d4133</td></tr>
+          <tr><td class="vname">--muted</td><td class="vval"><span class="vc" style="background:#766850"></span>#766850</td></tr>
+          <tr><td class="vname">--faint</td><td class="vval"><span class="vc" style="background:#a4937a"></span>#a4937a</td></tr>
+          <tr class="grp"><td colspan="2">lines</td></tr>
+          <tr><td class="vname">--line</td><td class="vval"><span class="vc" style="background:#ece0cd"></span>#ece0cd</td></tr>
+          <tr><td class="vname">--wire</td><td class="vval"><span class="vc" style="background:#dccdb3"></span>#dccdb3</td></tr>
+          <tr class="grp"><td colspan="2">brand — two-colour system</td></tr>
+          <tr><td class="vname">--primary</td><td class="vval"><span class="vc" style="background:#bb4d22"></span>#bb4d22</td></tr>
+          <tr><td class="vname">--accent</td><td class="vval"><span class="vc" style="background:#5b7a3f"></span>#5b7a3f</td></tr>
+          <tr><td class="vname">--accent-soft</td><td class="vval"><span class="vc" style="background:#e7eed8"></span>#e7eed8</td></tr>
+          <tr class="grp"><td colspan="2">semantics</td></tr>
+          <tr><td class="vname">--good</td><td class="vval"><span class="vc" style="background:#3f7d4e"></span>#3f7d4e</td></tr>
+          <tr><td class="vname">--good-soft</td><td class="vval"><span class="vc" style="background:#dcefdf"></span>#dcefdf</td></tr>
+          <tr><td class="vname">--warn</td><td class="vval"><span class="vc" style="background:#9a6310"></span>#9a6310</td></tr>
+          <tr><td class="vname">--warn-soft</td><td class="vval"><span class="vc" style="background:#f7e8c8"></span>#f7e8c8</td></tr>
+          <tr><td class="vname">--danger</td><td class="vval"><span class="vc" style="background:#bc2b2b"></span>#bc2b2b</td></tr>
+          <tr><td class="vname">--danger-soft</td><td class="vval"><span class="vc" style="background:#f8dada"></span>#f8dada</td></tr>
+          <tr class="grp"><td colspan="2">misc</td></tr>
+          <tr><td class="vname">--flat-soft</td><td class="vval"><span class="vc" style="background:#efe6d4"></span>#efe6d4</td></tr>
+          <tr class="grp"><td colspan="2">type — 3 tiers</td></tr>
+          <tr class="fontrow"><td class="vname">--font-display</td><td class="vval">'Fraunces', serif</td></tr>
+          <tr class="fontrow"><td class="vname">--font-body</td><td class="vval">'Newsreader', serif</td></tr>
+          <tr class="fontrow"><td class="vname">--font-sans</td><td class="vval">'Hanken Grotesk', sans-serif</td></tr>
+        </table>
+      </details>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       OPTION B — ATLAS
+       ================================================================= -->
+  <section class="opt opt-b">
+    <div class="opt-head">
+      <div class="badge-letter" style="background:#136a6f">B</div>
+      <div class="ttl">
+        <div class="nm"><h2>Atlas</h2><span class="mood">cool · nautical · precise</span></div>
+        <div class="type">
+          <span class="f">Display <b>Gloock</b> (fat, modern Didone — high drama, low fuss)</span> ·
+          <span class="f">Body <b>Source Serif 4</b> (clean reading serif)</span> ·
+          <span class="f">UI <b>Outfit</b> (geometric sans)</span> — deep petrol-teal primary, warm marigold accent. The lodestar that points north.
+        </div>
+      </div>
+    </div>
+
+    <div class="app">
+      <nav class="rail">
+        <div class="brand"><i class="fa-solid fa-compass star"></i><span class="bword">Lodestar</span></div>
+        <a class="future"><i class="fa-solid fa-sun"></i> Today</a>
+        <a class="future"><i class="fa-solid fa-layer-group"></i> Triage</a>
+        <a class="future"><i class="fa-solid fa-diagram-project"></i> Pipeline</a>
+        <a class="on"><i class="fa-solid fa-building"></i> Companies</a>
+        <a class="future"><i class="fa-solid fa-user-group"></i> Network</a>
+        <a class="future"><i class="fa-solid fa-chart-line"></i> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><i class="fa-solid fa-heart-pulse"></i> Checks</a>
+      </nav>
+      <div class="content">
+        <div class="mhead">
+          <h2>Companies</h2><span class="count">179</span>
+          <span class="search"><i class="fa-solid fa-magnifying-glass"></i> Search name, industry, notes…</span>
+          <span class="btn ghost"><i class="fa-solid fa-plus"></i> Add company</span>
+        </div>
+        <div class="tabs">
+          <span class="tab on">Queue <span class="c">179 due</span></span>
+          <span class="tab">All</span>
+          <span class="tab">By domain</span>
+          <span class="tab">Best prospects</span>
+        </div>
+        <div class="secthdr">Never fetched <span class="badge">179</span><span class="grow"></span>
+          <span class="btn primary sm"><i class="fa-solid fa-arrows-rotate"></i> Fetch all due</span></div>
+        <div class="qrow">
+          <span class="mono">St</span>
+          <div><div class="nm-co">Stripe</div><div class="meta">Financial Services · Enterprise · Remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary sm">Fetch jobs <i class="fa-solid fa-arrow-right"></i></span>
+        </div>
+        <div class="qrow">
+          <span class="mono">1P</span>
+          <div><div class="nm-co">1Password <span class="chip tag accent">B2B</span></div><div class="meta">Security · Scaleup · Remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary sm">Fetch jobs <i class="fa-solid fa-arrow-right"></i></span>
+        </div>
+        <div class="panel">
+          <div class="ph"><i class="fa-solid fa-note-sticky"></i> Notes <span class="sub">rendered markdown</span></div>
+          <div class="pb"><b>Why listed.</b> Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure, top-of-market comp (senior eng $250k+ total).</div>
+        </div>
+        <div class="states"><span class="lbl">States:</span>
+          <span class="chip good"><i class="fa-solid fa-circle-check"></i> no flags</span>
+          <span class="chip warn"><i class="fa-solid fa-triangle-exclamation"></i> caution</span>
+          <span class="chip danger"><i class="fa-solid fa-ban"></i> dealbreaker</span></div>
+      </div>
+    </div>
+
+    <div class="meta-foot">
+      <div class="strip">
+        <span class="sw"><i style="background:#f1ece1"></i>bg</span>
+        <span class="sw"><i style="background:#fcfaf4"></i>card</span>
+        <span class="sw"><i style="background:#13252a"></i>rail</span>
+        <span class="sw"><i style="background:#136a6f"></i>primary</span>
+        <span class="sw"><i style="background:#c98a16"></i>accent</span>
+        <span class="sw"><i style="background:#2f7d57"></i>good</span>
+        <span class="sw"><i style="background:#b06a0d"></i>warn</span>
+        <span class="sw"><i style="background:#cf3520"></i>danger</span>
+        <span class="sw"><i style="background:#1b2a2c"></i>ink</span>
+      </div>
+      <details class="tok">
+        <summary><i class="fa-solid fa-chevron-right chev"></i> tokens.css for Atlas</summary>
+        <table>
+          <tr class="grp"><td colspan="2">surfaces</td></tr>
+          <tr><td class="vname">--bg</td><td class="vval"><span class="vc" style="background:#f1ece1"></span>#f1ece1</td></tr>
+          <tr><td class="vname">--card</td><td class="vval"><span class="vc" style="background:#fcfaf4"></span>#fcfaf4</td></tr>
+          <tr><td class="vname">--panel-head</td><td class="vval"><span class="vc" style="background:#f3eee1"></span>#f3eee1</td></tr>
+          <tr class="grp"><td colspan="2">rail</td></tr>
+          <tr><td class="vname">--rail</td><td class="vval"><span class="vc" style="background:#13252a"></span>#13252a</td></tr>
+          <tr class="grp"><td colspan="2">text</td></tr>
+          <tr><td class="vname">--ink</td><td class="vval"><span class="vc" style="background:#1b2a2c"></span>#1b2a2c</td></tr>
+          <tr><td class="vname">--ink-soft</td><td class="vval"><span class="vc" style="background:#39494a"></span>#39494a</td></tr>
+          <tr><td class="vname">--muted</td><td class="vval"><span class="vc" style="background:#5f6f6b"></span>#5f6f6b</td></tr>
+          <tr><td class="vname">--faint</td><td class="vval"><span class="vc" style="background:#9aa39a"></span>#9aa39a</td></tr>
+          <tr class="grp"><td colspan="2">lines</td></tr>
+          <tr><td class="vname">--line</td><td class="vval"><span class="vc" style="background:#e3ddcf"></span>#e3ddcf</td></tr>
+          <tr><td class="vname">--wire</td><td class="vval"><span class="vc" style="background:#cdc6b4"></span>#cdc6b4</td></tr>
+          <tr class="grp"><td colspan="2">brand — two-colour system</td></tr>
+          <tr><td class="vname">--primary</td><td class="vval"><span class="vc" style="background:#136a6f"></span>#136a6f</td></tr>
+          <tr><td class="vname">--accent</td><td class="vval"><span class="vc" style="background:#c98a16"></span>#c98a16</td></tr>
+          <tr><td class="vname">--accent-soft</td><td class="vval"><span class="vc" style="background:#f6e7c4"></span>#f6e7c4</td></tr>
+          <tr class="grp"><td colspan="2">semantics</td></tr>
+          <tr><td class="vname">--good</td><td class="vval"><span class="vc" style="background:#2f7d57"></span>#2f7d57</td></tr>
+          <tr><td class="vname">--good-soft</td><td class="vval"><span class="vc" style="background:#d7eede"></span>#d7eede</td></tr>
+          <tr><td class="vname">--warn</td><td class="vval"><span class="vc" style="background:#b06a0d"></span>#b06a0d</td></tr>
+          <tr><td class="vname">--warn-soft</td><td class="vval"><span class="vc" style="background:#f7e6c6"></span>#f7e6c6</td></tr>
+          <tr><td class="vname">--danger</td><td class="vval"><span class="vc" style="background:#cf3520"></span>#cf3520</td></tr>
+          <tr><td class="vname">--danger-soft</td><td class="vval"><span class="vc" style="background:#fadcd5"></span>#fadcd5</td></tr>
+          <tr class="grp"><td colspan="2">misc</td></tr>
+          <tr><td class="vname">--flat-soft</td><td class="vval"><span class="vc" style="background:#e9e3d4"></span>#e9e3d4</td></tr>
+          <tr class="grp"><td colspan="2">type — 3 tiers</td></tr>
+          <tr class="fontrow"><td class="vname">--font-display</td><td class="vval">'Gloock', serif</td></tr>
+          <tr class="fontrow"><td class="vname">--font-body</td><td class="vval">'Source Serif 4', serif</td></tr>
+          <tr class="fontrow"><td class="vname">--font-sans</td><td class="vval">'Outfit', sans-serif</td></tr>
+        </table>
+      </details>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       OPTION C — VESPER
+       ================================================================= -->
+  <section class="opt opt-c">
+    <div class="opt-head">
+      <div class="badge-letter" style="background:#7d2348">C</div>
+      <div class="ttl">
+        <div class="nm"><h2>Vesper</h2><span class="mood">dusky · luxe · evening</span></div>
+        <div class="type">
+          <span class="f">Display <b>Bodoni Moda</b> (dramatic hairline-contrast Didone)</span> ·
+          <span class="f">Body <b>Lora</b> (warm reading serif)</span> ·
+          <span class="f">UI <b>Spline Sans</b> (neutral, friendly sans)</span> — aubergine-wine primary, antique-gold accent on mauve-warmed paper.
+        </div>
+      </div>
+    </div>
+
+    <div class="app">
+      <nav class="rail">
+        <div class="brand"><i class="fa-solid fa-compass star"></i><span class="bword">Lodestar</span></div>
+        <a class="future"><i class="fa-solid fa-sun"></i> Today</a>
+        <a class="future"><i class="fa-solid fa-layer-group"></i> Triage</a>
+        <a class="future"><i class="fa-solid fa-diagram-project"></i> Pipeline</a>
+        <a class="on"><i class="fa-solid fa-building"></i> Companies</a>
+        <a class="future"><i class="fa-solid fa-user-group"></i> Network</a>
+        <a class="future"><i class="fa-solid fa-chart-line"></i> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><i class="fa-solid fa-heart-pulse"></i> Checks</a>
+      </nav>
+      <div class="content">
+        <div class="mhead">
+          <h2>Companies</h2><span class="count">179</span>
+          <span class="search"><i class="fa-solid fa-magnifying-glass"></i> Search name, industry, notes…</span>
+          <span class="btn ghost"><i class="fa-solid fa-plus"></i> Add company</span>
+        </div>
+        <div class="tabs">
+          <span class="tab on">Queue <span class="c">179 due</span></span>
+          <span class="tab">All</span>
+          <span class="tab">By domain</span>
+          <span class="tab">Best prospects</span>
+        </div>
+        <div class="secthdr">Never fetched <span class="badge">179</span><span class="grow"></span>
+          <span class="btn primary sm"><i class="fa-solid fa-arrows-rotate"></i> Fetch all due</span></div>
+        <div class="qrow">
+          <span class="mono">St</span>
+          <div><div class="nm-co">Stripe</div><div class="meta">Financial Services · Enterprise · Remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary sm">Fetch jobs <i class="fa-solid fa-arrow-right"></i></span>
+        </div>
+        <div class="qrow">
+          <span class="mono">1P</span>
+          <div><div class="nm-co">1Password <span class="chip tag accent">B2B</span></div><div class="meta">Security · Scaleup · Remote-first</div></div>
+          <span class="sub">never checked</span>
+          <span class="btn primary sm">Fetch jobs <i class="fa-solid fa-arrow-right"></i></span>
+        </div>
+        <div class="panel">
+          <div class="ph"><i class="fa-solid fa-note-sticky"></i> Notes <span class="sub">rendered markdown</span></div>
+          <div class="pb"><b>Why listed.</b> Does not require degrees; credentials-blind technical assessments. Ruby in infrastructure, top-of-market comp (senior eng $250k+ total).</div>
+        </div>
+        <div class="states"><span class="lbl">States:</span>
+          <span class="chip good"><i class="fa-solid fa-circle-check"></i> no flags</span>
+          <span class="chip warn"><i class="fa-solid fa-triangle-exclamation"></i> caution</span>
+          <span class="chip danger"><i class="fa-solid fa-ban"></i> dealbreaker</span></div>
+      </div>
+    </div>
+
+    <div class="meta-foot">
+      <div class="strip">
+        <span class="sw"><i style="background:#f1e9e4"></i>bg</span>
+        <span class="sw"><i style="background:#fdf9f5"></i>card</span>
+        <span class="sw"><i style="background:#241921"></i>rail</span>
+        <span class="sw"><i style="background:#7d2348"></i>primary</span>
+        <span class="sw"><i style="background:#b58320"></i>accent</span>
+        <span class="sw"><i style="background:#3c7a52"></i>good</span>
+        <span class="sw"><i style="background:#a76a16"></i>warn</span>
+        <span class="sw"><i style="background:#c23320"></i>danger</span>
+        <span class="sw"><i style="background:#291d24"></i>ink</span>
+      </div>
+      <details class="tok">
+        <summary><i class="fa-solid fa-chevron-right chev"></i> tokens.css for Vesper</summary>
+        <table>
+          <tr class="grp"><td colspan="2">surfaces</td></tr>
+          <tr><td class="vname">--bg</td><td class="vval"><span class="vc" style="background:#f1e9e4"></span>#f1e9e4</td></tr>
+          <tr><td class="vname">--card</td><td class="vval"><span class="vc" style="background:#fdf9f5"></span>#fdf9f5</td></tr>
+          <tr><td class="vname">--panel-head</td><td class="vval"><span class="vc" style="background:#f6ebed"></span>#f6ebed</td></tr>
+          <tr class="grp"><td colspan="2">rail</td></tr>
+          <tr><td class="vname">--rail</td><td class="vval"><span class="vc" style="background:#241921"></span>#241921</td></tr>
+          <tr class="grp"><td colspan="2">text</td></tr>
+          <tr><td class="vname">--ink</td><td class="vval"><span class="vc" style="background:#291d24"></span>#291d24</td></tr>
+          <tr><td class="vname">--ink-soft</td><td class="vval"><span class="vc" style="background:#4b3a45"></span>#4b3a45</td></tr>
+          <tr><td class="vname">--muted</td><td class="vval"><span class="vc" style="background:#75606c"></span>#75606c</td></tr>
+          <tr><td class="vname">--faint</td><td class="vval"><span class="vc" style="background:#a890a0"></span>#a890a0</td></tr>
+          <tr class="grp"><td colspan="2">lines</td></tr>
+          <tr><td class="vname">--line</td><td class="vval"><span class="vc" style="background:#ebdde1"></span>#ebdde1</td></tr>
+          <tr><td class="vname">--wire</td><td class="vval"><span class="vc" style="background:#dcc7cd"></span>#dcc7cd</td></tr>
+          <tr class="grp"><td colspan="2">brand — two-colour system</td></tr>
+          <tr><td class="vname">--primary</td><td class="vval"><span class="vc" style="background:#7d2348"></span>#7d2348</td></tr>
+          <tr><td class="vname">--accent</td><td class="vval"><span class="vc" style="background:#b58320"></span>#b58320</td></tr>
+          <tr><td class="vname">--accent-soft</td><td class="vval"><span class="vc" style="background:#f4e7c5"></span>#f4e7c5</td></tr>
+          <tr class="grp"><td colspan="2">semantics</td></tr>
+          <tr><td class="vname">--good</td><td class="vval"><span class="vc" style="background:#3c7a52"></span>#3c7a52</td></tr>
+          <tr><td class="vname">--good-soft</td><td class="vval"><span class="vc" style="background:#daecdf"></span>#daecdf</td></tr>
+          <tr><td class="vname">--warn</td><td class="vval"><span class="vc" style="background:#a76a16"></span>#a76a16</td></tr>
+          <tr><td class="vname">--warn-soft</td><td class="vval"><span class="vc" style="background:#f5e6c8"></span>#f5e6c8</td></tr>
+          <tr><td class="vname">--danger</td><td class="vval"><span class="vc" style="background:#c23320"></span>#c23320</td></tr>
+          <tr><td class="vname">--danger-soft</td><td class="vval"><span class="vc" style="background:#f7d9d3"></span>#f7d9d3</td></tr>
+          <tr class="grp"><td colspan="2">misc</td></tr>
+          <tr><td class="vname">--flat-soft</td><td class="vval"><span class="vc" style="background:#efe1e3"></span>#efe1e3</td></tr>
+          <tr class="grp"><td colspan="2">type — 3 tiers</td></tr>
+          <tr class="fontrow"><td class="vname">--font-display</td><td class="vval">'Bodoni Moda', serif</td></tr>
+          <tr class="fontrow"><td class="vname">--font-body</td><td class="vval">'Lora', serif</td></tr>
+          <tr class="fontrow"><td class="vname">--font-sans</td><td class="vval">'Spline Sans', sans-serif</td></tr>
+        </table>
+      </details>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       ICON AUDIT
+       ================================================================= -->
+  <section class="card">
+    <h2>FontAwesome Solid (free) — icon coverage audit</h2>
+    <p>Every icon below is rendered live from FA 6.5 Free (Solid). In the app these ship via the FA <b>library</b> package
+      (tree-shaken, no inline SVG soup). The free Solid set covers the entire surface — nav, actions, and the likely
+      pipeline-step glyphs. Two spots are <em>judgement calls</em>, flagged below, where a Heroicon would be the cleaner pick.</p>
+
+    <div class="auditgrid">
+      <div class="ai"><i class="fa-solid fa-sun"></i><span><span class="lab">Today</span><span class="sm ok">fa-sun ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-layer-group"></i><span><span class="lab">Triage</span><span class="sm ok">fa-layer-group ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-diagram-project"></i><span><span class="lab">Pipeline</span><span class="sm ok">fa-diagram-project ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-building"></i><span><span class="lab">Companies</span><span class="sm ok">fa-building ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-user-group"></i><span><span class="lab">Network</span><span class="sm ok">fa-user-group ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-chart-line"></i><span><span class="lab">Patterns</span><span class="sm ok">fa-chart-line ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-heart-pulse"></i><span><span class="lab">Checks</span><span class="sm ok">fa-heart-pulse ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-arrows-rotate"></i><span><span class="lab">Fetch / re-fetch</span><span class="sm ok">fa-arrows-rotate ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-magnifying-glass"></i><span><span class="lab">Search</span><span class="sm ok">fa-magnifying-glass ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-plus"></i><span><span class="lab">Add</span><span class="sm ok">fa-plus ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-pen"></i><span><span class="lab">Edit</span><span class="sm ok">fa-pen ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-floppy-disk"></i><span><span class="lab">Save</span><span class="sm ok">fa-floppy-disk ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-xmark"></i><span><span class="lab">Cancel</span><span class="sm ok">fa-xmark ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-arrow-up-right-from-square"></i><span><span class="lab">External link</span><span class="sm ok">fa-arrow-up-right-from-square ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-circle-check"></i><span><span class="lab">Mark checked</span><span class="sm ok">fa-circle-check ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-trash-can"></i><span><span class="lab">Remove / trash</span><span class="sm ok">fa-trash-can ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-triangle-exclamation"></i><span><span class="lab">Warn state</span><span class="sm ok">fa-triangle-exclamation ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-ban"></i><span><span class="lab">Danger / dealbreaker</span><span class="sm ok">fa-ban ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-compass"></i><span><span class="lab">Brand (lodestar)</span><span class="sm ok">fa-compass ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-inbox"></i><span><span class="lab">Pipeline: Applied</span><span class="sm ok">fa-inbox ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-comments"></i><span><span class="lab">Pipeline: Interview</span><span class="sm ok">fa-comments ✓</span></span></div>
+      <div class="ai"><i class="fa-solid fa-file-signature"></i><span><span class="lab">Pipeline: Offer</span><span class="sm ok">fa-file-signature ✓</span></span></div>
+      <div class="ai gap"><i class="fa-solid fa-inbox miss"></i><span><span class="lab">Triage "inbox-stack"</span><span class="sm miss">FA has fa-inbox only — Heroicons has inbox-stack (the layered tray you used before). Minor.</span></span></div>
+      <div class="ai gap"><i class="fa-solid fa-table-cells-large miss"></i><span><span class="lab">Pipeline "kanban"</span><span class="sm miss">No true kanban glyph in FA Free; fa-table-columns is the stand-in. Heroicons view-columns reads more board-like.</span></span></div>
+    </div>
+
+    <div class="legendline">
+      <span><b><i class="fa-solid fa-check" style="color:#4d7c3a"></i> Covered (22)</b> — entire current + near-term surface.</span>
+      <span><b><i class="fa-solid fa-circle-exclamation" style="color:#b23a2e"></i> Soft gaps (2)</b> — both have acceptable FA stand-ins; neither blocks shipping FA-only.</span>
+    </div>
+
+    <div class="rec">
+      <p style="margin:0"><b>Verdict on icons:</b> FA Solid (free) covers everything Lodestar needs today and through the pipeline build-out.
+      The only places Heroicons is strictly nicer are <em>inbox-stack</em> (Triage) and a board/kanban glyph (Pipeline) — cosmetic,
+      not blocking. Recommendation: <b>go FA-only</b> for one consistent line-weight and the package-based workflow you prefer; if
+      Triage/Pipeline glyphs ever bug you, those two are easy one-offs to swap.</p>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       RECOMMENDATION
+       ================================================================= -->
+  <section class="card" style="border-left:4px solid #9c4a23">
+    <h2>My recommendation</h2>
+    <p style="margin-bottom:.7rem"><b>Lead with A — Ember &amp; Sage.</b> It's the truest to your brief: a confident burnt-orange
+      primary with a genuinely different-hue sage accent, warm paper, and Fraunces set with real presence (high optical size + a
+      touch of SOFT on the italic so headings feel drawn, not defaulted). It reads calm and editorial without tipping into precious.
+      Newsreader keeps long notes comfortable; Hanken stays crisp at 12px in tabs and meta.</p>
+    <p style="margin-bottom:.7rem"><b>B — Atlas</b> is the wildcard if you want the app to feel less "warm-cozy" and more
+      "instrument": the petrol/marigold contrast is striking and on-concept for a <em>lodestar</em> (north star / navigation), and
+      Gloock gives unmistakable headline character. It's warm-leaning via the marigold + paper but cooler overall — the meaningful
+      temperature departure you asked for.</p>
+    <p><b>C — Vesper</b> is the most fashion-forward: aubergine + antique gold is luxe and distinctive, but Bodoni Moda's hairlines
+      demand large sizes to stay legible and the plum can feel heavy for an all-day work tool. Pick it if you want the app to feel
+      like an object, not a utility. A safe hybrid: <b>A's palette with B's Gloock headings</b> if Fraunces reads too soft for you.</p>
+  </section>
+
+  <p style="color:#6a5f55;font-size:.85rem;margin-top:1.6rem">Adopting any direction = swap the values in
+    <code style="background:#d9cfbd;padding:.05rem .34rem;border-radius:5px">tokens.css</code>, add the <code style="background:#d9cfbd;padding:.05rem .34rem;border-radius:5px">--primary</code> /
+    <code style="background:#d9cfbd;padding:.05rem .34rem;border-radius:5px">--accent</code> split + the three <code style="background:#d9cfbd;padding:.05rem .34rem;border-radius:5px">--font-*</code> tokens
+    (with self-hosted <code style="background:#d9cfbd;padding:.05rem .34rem;border-radius:5px">@font-face</code> for offline/local-first), and register the FA icon set via its package library.</p>
+</div>
+</body>
+</html>

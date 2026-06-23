@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar — Job-detail route directions</title>
+<style>
+/* Tokens verbatim from src/lib/styles/tokens.css (live "Vesper" theme). */
+:root{
+  --bg:#f1e9e4; --card:#fdf9f5; --card-hover:#f5ece6; --panel-head:#f6ebed;
+  --rail:#241921; --rail-ink:#bca7b3; --rail-ink-active:#fff; --rail-hover:#33232f; --rail-muted:#856f7d; --rail-sep:#382734;
+  --ink:#291d24; --ink-soft:#4b3a45; --muted:#75606c; --faint:#a890a0;
+  --line:#ebdde1; --wire:#dcc7cd;
+  --primary:#7d2348; --primary-hover:#691838; --primary-ring:rgba(125,35,72,.16); --primary-soft:#f3dbe4;
+  --accent:#b58320; --accent-soft:#f4e7c5; --accent-ink:#8a6110;
+  --good:#3c7a52; --good-soft:#daecdf; --warn:#b8701a; --warn-soft:#f6e7c7;
+  --danger:#c23320; --danger-soft:#f7d9d3; --danger-border:#ecb3a8;
+  --flat-soft:#efe1e3;
+  --font-display:"Bodoni Moda",Georgia,serif; --font-body:"Lora",Georgia,serif;
+  --font-sans:"Spline Sans",-apple-system,system-ui,sans-serif;
+  --fs-2xs:.66rem; --fs-xs:.74rem; --fs-sm:.82rem; --fs-md:.92rem; --fs-lg:1.05rem; --fs-xl:1.4rem; --fs-2xl:1.5rem;
+  --monogram-size:2rem; --monogram-fs:.66rem;
+  --sp-1:.25rem; --sp-2:.5rem; --sp-3:.75rem; --sp-4:1rem; --sp-5:1.5rem; --sp-6:2rem;
+  --sp-row-y:.6rem; --sp-content:1.2rem; --rail-w:9.5rem;
+  --r-sm:0; --r-md:0; --r-pill:0; --r-panel:0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-sans);line-height:1.5}
+.page{max-width:1180px;margin:0 auto;padding:1.6rem 1.25rem 5rem}
+.page h1{font-family:var(--font-display);font-size:1.9rem;margin:0 0 .2rem}
+.page .lede{color:var(--muted);max-width:80ch;font-size:.92rem;margin:.25rem 0 0}
+.page .lede code{background:var(--flat-soft);padding:.05rem .3rem;font-size:.86em}
+.dirhead{margin:2.6rem 0 .2rem;display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap;border-top:2px solid var(--primary);padding-top:.8rem}
+.dirhead .n{font-family:var(--font-display);font-weight:700;color:var(--primary);font-size:.8rem;letter-spacing:.12em;text-transform:uppercase}
+.dirhead h2{font-family:var(--font-display);font-size:1.45rem;margin:0}
+.dirhead .tag{font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);font-weight:700}
+.rationale{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);padding:.6rem .85rem;margin:.55rem 0 1rem;font-size:.86rem;color:var(--ink-soft)}
+.rationale b{color:var(--ink)} .rationale .trade{color:var(--danger)}
+
+/* shell + atoms */
+.app{display:grid;grid-template-columns:var(--rail-w) 1fr;border:1px solid var(--wire);box-shadow:0 1px 3px rgba(40,15,30,.08);background:var(--card)}
+.rail{background:var(--rail);color:var(--rail-ink);padding:.6rem 0;font-size:var(--fs-sm)}
+.rail__brand{color:var(--rail-ink-active);font-family:var(--font-display);font-size:var(--fs-2xl);font-weight:700;padding:.3rem .55rem .7rem;display:flex;gap:.45rem;align-items:center}
+.rail__brand .star{color:var(--accent)}
+.navlink{display:flex;align-items:center;gap:.45rem;padding:.4rem 1.05rem;font-size:var(--fs-md);font-weight:500;color:var(--rail-ink);text-decoration:none}
+.navlink .ico{width:1rem;text-align:center;opacity:.85}
+.navlink.on{background:var(--rail-ink);color:var(--rail);font-weight:700}
+.navlink.future{color:var(--rail-muted)}
+.rail__sep{height:1px;background:var(--rail-sep);margin:.5rem .4rem}
+.rail__util{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.06em;color:var(--rail-muted);padding:.3rem .55rem .1rem}
+.app__content{min-width:0;background:var(--card)}
+.workspace{padding:1rem var(--sp-content) 1.4rem}
+.crumbs{font-size:var(--fs-xs);color:var(--muted);margin:0 0 var(--sp-2)}
+.crumbs a{color:var(--primary);text-decoration:none}
+.btn{display:inline-flex;align-items:center;gap:.3rem;padding:.4rem .7rem;border:1px solid var(--wire);border-radius:var(--r-md);background:var(--card);color:var(--ink);font:inherit;font-size:var(--fs-sm);text-decoration:none;cursor:pointer}
+.btn:hover{background:var(--card-hover)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:600}
+.btn.ghost{border-style:dashed;color:var(--muted)}
+.btn.danger{color:var(--danger);border-color:var(--danger-border)}
+.btn.sm{padding:.26rem .55rem;font-size:var(--fs-xs)}
+.linkbtn{border:none;background:none;color:var(--primary);cursor:pointer;font:inherit;font-size:var(--fs-sm);padding:0}
+.chip{display:inline-flex;align-items:center;gap:.25rem;font-size:var(--fs-xs);border-radius:var(--r-pill);padding:.2rem .48rem;white-space:nowrap}
+.chip.good{background:var(--good-soft);color:var(--good)} .chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.danger{background:var(--danger-soft);color:var(--danger)} .chip.flat{background:var(--flat-soft);color:var(--muted)}
+.chip.accent{background:var(--accent-soft);color:var(--accent-ink)}
+.tabs{display:flex;gap:var(--sp-1);border-bottom:1px solid var(--line);margin-bottom:.6rem}
+.tab{font:inherit;font-size:var(--fs-sm);padding:.4rem .6rem;color:var(--muted);border:none;border-bottom:2px solid transparent;background:none;cursor:pointer;display:inline-flex;align-items:center;gap:var(--sp-1);margin-bottom:-1px}
+.tab.on{color:var(--primary);border-bottom-color:var(--primary);font-weight:700}
+.panel{border:1px solid var(--line);border-radius:var(--r-panel);margin-top:var(--sp-3);overflow:hidden}
+.panel__head{display:flex;justify-content:space-between;align-items:center;padding:.5rem .75rem;background:var(--panel-head);border-bottom:1px solid var(--line);font-weight:600;font-size:var(--fs-xs);color:var(--ink)}
+.panel__body{padding:.7rem .8rem}
+.sub{color:var(--faint);font-size:var(--fs-xs)}
+.meta-grid{display:grid;grid-template-columns:auto 1fr;gap:.55rem 1.1rem;font-size:var(--fs-md);margin:0;align-items:baseline}
+.meta-grid dt{color:var(--muted);font-size:var(--fs-sm)}
+.meta-grid dd{margin:0;font-family:var(--font-body);color:var(--ink)}
+.notes{font-family:var(--font-body);font-size:var(--fs-md);color:var(--ink-soft)}
+.notes p{margin:.5rem 0} .notes p:first-child{margin-top:0}
+.notes .wl{color:var(--primary);text-decoration:none;border-bottom:1px dotted var(--primary)}
+.notes b{color:var(--ink)}
+
+/* ---- shared fit vocabulary ---- */
+.identity .title{font-family:var(--font-display);font-size:1.6rem;font-weight:600;margin:0;line-height:1.15}
+.identity .co{color:var(--muted);font-size:var(--fs-sm);margin:.15rem 0 0}
+.identity .co a{color:var(--primary);text-decoration:none}
+.fitbig{font-family:var(--font-display);font-weight:700;line-height:.9}
+.fitbig.strong,.fitbig.good{color:var(--good)} .fitbig.partial,.fitbig.weak{color:var(--warn)} .fitbig.dead{color:var(--danger)}
+.bandword{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.subrow{display:flex;flex-direction:column;gap:.4rem}
+.subline{display:grid;grid-template-columns:5.2rem 1fr 2.2rem;gap:.5rem;align-items:center;font-size:var(--fs-xs);color:var(--muted)}
+.subline .bar{height:.45rem;background:var(--line)}
+.subline .bar i{display:block;height:100%;background:var(--accent)}
+.subline .bar i.lo{background:var(--warn)}
+.subline .v{text-align:right;font-family:var(--font-display);font-weight:700;color:var(--ink-soft)}
+.flagrow{display:flex;gap:.5rem;align-items:flex-start;font-size:var(--fs-sm);padding:.35rem 0;border-top:1px solid var(--line)}
+.flagrow:first-child{border-top:none}
+.flagrow .lvl{flex:none}
+.flagrow .det{color:var(--ink-soft)}
+.researched-tag{font-size:var(--fs-2xs);color:var(--accent-ink);background:var(--accent-soft);padding:.02rem .3rem;margin-left:.35rem;white-space:nowrap}
+.editline{display:flex;align-items:center;gap:.4rem}
+.editline input,.editline select{font:inherit;font-size:var(--fs-sm);border:1px solid var(--wire);background:var(--card);padding:.22rem .45rem;color:var(--ink);border-radius:0}
+.savedtick{color:var(--good);font-size:var(--fs-xs)}
+.skilltags{display:flex;gap:.3rem;flex-wrap:wrap}
+.deadbanner{background:var(--danger-soft);border:1px solid var(--danger-border);border-left:4px solid var(--danger);padding:.55rem .75rem;font-size:var(--fs-sm);color:#7a1c10;margin-top:var(--sp-3)}
+.deadbanner b{color:var(--danger)}
+
+/* ===================== D1 — DECISION BRIEF (single column) ===================== */
+.d1-head{display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap}
+.d1-head .scorebox{flex:none;text-align:center;border:1px solid var(--line);padding:.5rem .9rem;min-width:6rem}
+.d1-head .scorebox .fitbig{font-size:3rem}
+.d1-head .actions{margin-left:auto;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.d1-fitband{display:grid;grid-template-columns:1.2fr 1fr;gap:.9rem;margin-top:var(--sp-3)}
+@media(max-width:760px){.d1-fitband{grid-template-columns:1fr}}
+.hero-narr{margin-top:var(--sp-4)}
+.hero-narr .panel__head{background:var(--primary);color:#fff;border-color:var(--primary)}
+.hero-narr .panel__head .sub{color:#e9cdd8}
+.collapsed-head{cursor:pointer}
+.collapsed-head .chev{color:var(--accent-ink)}
+
+/* ===================== D2 — TWO-PANE WORKBENCH ===================== */
+.d2-grid{display:grid;grid-template-columns:18rem 1fr;gap:1rem;align-items:start}
+@media(max-width:820px){.d2-grid{grid-template-columns:1fr}}
+.d2-aside{position:sticky;top:1rem;border:1px solid var(--line);background:var(--card)}
+.d2-aside .sec{padding:.7rem .8rem;border-bottom:1px solid var(--line)}
+.d2-aside .sec:last-child{border-bottom:none}
+.d2-aside .scoreline{display:flex;align-items:baseline;gap:.5rem}
+.d2-aside .scoreline .fitbig{font-size:2.6rem}
+.d2-statuspick{display:flex;align-items:center;gap:.4rem}
+.d2-main{min-width:0}
+
+/* ===================== D3 — TABBED DOSSIER ===================== */
+.d3-headbar{display:flex;align-items:flex-start;gap:1rem;flex-wrap:wrap;padding-bottom:.7rem;border-bottom:1px solid var(--line)}
+.d3-headbar .fitmini{flex:none;text-align:center}
+.d3-headbar .fitmini .fitbig{font-size:2.2rem}
+.d3-headbar .actions{margin-left:auto;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.d3-subscores{display:flex;gap:1rem;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--muted);margin-top:.5rem}
+.d3-subscores .s{display:flex;flex-direction:column;align-items:center;min-width:3.2rem}
+.d3-subscores .s b{font-family:var(--font-display);color:var(--ink-soft);font-size:var(--fs-md)}
+.d3-subscores .s .bar{height:.3rem;width:100%;background:var(--line);margin-top:.15rem}
+.d3-subscores .s .bar i{display:block;height:100%;background:var(--accent)}
+.d3-subscores .s .bar i.lo{background:var(--warn)}
+@media(max-width:680px){.app{grid-template-columns:1fr}.rail{display:none}}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Job-detail route <code style="font-size:1rem;background:var(--flat-soft);padding:.05rem .35rem">/jobs/[slug]</code> — three directions</h1>
+  <p class="lede">Greenfield full view of one role: identity, computed fit (headline + 5 sub-scores + flags), the qualitative <b>alignment narrative</b> (the most decision-relevant content, cites accomplishments as <code>[[slug]]</code>), the structured JD + brief with raw-JD access, and research provenance (web-researched fields flagged). Supports editing structured fields (each edit persists), setting status, and getting back to the company. Built on live Vesper tokens + real atoms. D1 shows a <b>strong fit</b>; D2 shows a <b>mid-edit</b> state; D3 shows a <b>dealbroken (score 0)</b> role.</p>
+
+  <!-- ====================================================================
+       DIRECTION 1 — DECISION BRIEF  (single scrolling column, narrative hero)
+       ==================================================================== -->
+  <div class="dirhead">
+    <span class="n">Direction 1</span>
+    <h2>Decision Brief</h2>
+    <span class="tag">single column · narrative-first</span>
+  </div>
+  <div class="rationale">
+    <b>Rationale.</b> Reads top-down like a memo built for one decision: identity + a big fit score, a compact fit band (sub-scores + flags), then the <b>alignment narrative as the hero</b> (it's the content that actually drives pursue/pass). The curate-able data — structured JD, research provenance, raw JD — sits below in collapsible sections, available but never competing with the verdict. <b>Strong-fit example.</b>
+    <span class="trade"><b>Tradeoff:</b></span> editing structured fields means scrolling past the narrative to the JD section; the score/status controls scroll away (no persistent decision affordance), so heavy data-curation sessions feel like a lot of up-and-down.
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="rail__brand"><span class="star">✦</span> Lodestar</div>
+      <a class="navlink future"><span class="ico">○</span> Today</a>
+      <a class="navlink future"><span class="ico">▤</span> Triage</a>
+      <a class="navlink future"><span class="ico">⇄</span> Pipeline</a>
+      <a class="navlink on"><span class="ico">▣</span> Companies</a>
+      <a class="navlink future"><span class="ico">◴</span> Network</a>
+      <div class="rail__sep"></div><div class="rail__util">Diagnostics</div>
+      <a class="navlink future"><span class="ico">✚</span> Checks</a>
+    </nav>
+    <div class="app__content">
+      <div class="workspace">
+        <p class="crumbs"><a href="#">← Companies</a> / <a href="#">Lattice</a> / Founding Engineer</p>
+        <div class="d1-head identity">
+          <div class="scorebox"><div class="fitbig strong">86</div><div class="bandword" style="color:var(--good)">strong</div></div>
+          <div>
+            <h1 class="title">Founding Engineer</h1>
+            <p class="co"><a href="#">Lattice</a> · Senior · Remote (US) · HR Tech · Series F</p>
+            <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap">
+              <span class="chip flat">Status: Reviewed ▾</span>
+              <span class="chip good">no dealbreakers</span>
+            </div>
+          </div>
+          <div class="actions">
+            <a class="btn primary sm" href="#">Apply ↗</a>
+            <a class="btn sm" href="#">JD source ↗</a>
+          </div>
+        </div>
+
+        <div class="d1-fitband">
+          <div class="panel" style="margin-top:0">
+            <div class="panel__head">Fit breakdown <span class="sub">weighted · 86 / 100</span></div>
+            <div class="panel__body subrow">
+              <div class="subline"><span>Seniority</span><div class="bar"><i style="width:90%"></i></div><span class="v">.90</span></div>
+              <div class="subline"><span>Skills</span><div class="bar"><i style="width:80%"></i></div><span class="v">.80</span></div>
+              <div class="subline"><span>Comp</span><div class="bar"><i style="width:95%"></i></div><span class="v">.95</span></div>
+              <div class="subline"><span>Arrangement</span><div class="bar"><i style="width:100%"></i></div><span class="v">1.0</span></div>
+              <div class="subline"><span>Domain</span><div class="bar"><i style="width:60%"></i></div><span class="v">.60</span></div>
+            </div>
+          </div>
+          <div class="panel" style="margin-top:0">
+            <div class="panel__head">Fit flags <span class="sub">1 caution · 0 dealbreakers</span></div>
+            <div class="panel__body">
+              <div class="flagrow"><span class="lvl chip warn">CAUTION</span><span class="det"><b>domain</b> — HR Tech is outside your preferred domains (dev-tools, infra); not disqualifying.</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- HERO: alignment narrative -->
+        <div class="panel hero-narr">
+          <div class="panel__head">Alignment analysis <span class="sub">qualitative · cites your accomplishments</span></div>
+          <div class="panel__body notes">
+            <p>This is a strong fit and worth a real push. The role is a true founding-engineer seat — small team, broad surface, comp at the top of your band ($210–260k + 0.5–1.0%) — and your trajectory maps cleanly onto it. Lead with <a class="wl" href="#">[[scaled-platform-team-0-to-30]]</a>: going from founding hire to a 30-person org is exactly the arc they're hiring against, and it answers the unspoken "can you both build and grow this?" question better than any single IC credential would.</p>
+            <p>On skills the .80 undersells you. The JD leans Rust/TS/Postgres; your Rust is recent and load-bearing (<a class="wl" href="#">[[rewrote-ingestion-in-rust]]</a>), and the one visible gap — they mention event-sourcing — is a learnable nice-to-have, not a must-have. Don't over-index on it.</p>
+            <p>The honest watch-item is <b>domain</b>: you've spent your career in infra/dev-tools, and HR Tech is adjacent at best. It's not a dealbreaker, but expect them to probe domain motivation — get ahead of it by framing the product as a data/platform problem (which it is) rather than an HR one. If you want this, you can win it; spend the prep on the "why this space" story, not the engineering.</p>
+          </div>
+        </div>
+
+        <!-- collapsible data sections -->
+        <div class="panel">
+          <div class="panel__head collapsed-head"><span><span class="chev">▾</span> Structured JD &amp; candidate brief</span><button class="linkbtn">edit ✎</button></div>
+          <div class="panel__body">
+            <dl class="meta-grid">
+              <dt>Comp band</dt><dd>$210,000 – $260,000 / yr <span class="researched-tag">researched · medium</span></dd>
+              <dt>Equity</dt><dd>0.5% – 1.0%</dd>
+              <dt>Remote</dt><dd>Remote (US)</dd>
+              <dt>YOE</dt><dd>8+ years</dd>
+              <dt>Employment</dt><dd>Full-time</dd>
+              <dt>Required</dt><dd><div class="skilltags"><span class="chip flat">Rust</span><span class="chip flat">TypeScript</span><span class="chip flat">Postgres</span><span class="chip flat">distributed-systems</span></div></dd>
+              <dt>Preferred</dt><dd><div class="skilltags"><span class="chip flat">event-sourcing</span><span class="chip flat">k8s</span></div></dd>
+              <dt>Posted</dt><dd>2026-06-12</dd>
+            </dl>
+            <div class="notes" style="margin-top:.7rem;border-top:1px solid var(--line);padding-top:.6rem">
+              <p><b>Role brief.</b> First dedicated platform hire; own data ingestion + the API surface other teams build on. Reports to CTO.</p>
+              <p><b>Must-haves:</b> shipped backend systems at scale; comfortable as an early/founding eng. <b>Nice-to-haves:</b> event-sourcing, prior 0→1. <b>Open questions:</b> on-call expectations; team size in 12 months.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel__head collapsed-head"><span><span class="chev">▸</span> Research provenance <span class="sub">2 fields web-filled</span></span></div>
+          <div class="panel__body notes" style="display:none">collapsed</div>
+        </div>
+        <div class="panel">
+          <div class="panel__head collapsed-head"><span><span class="chev">▸</span> Raw JD <span class="sub">scraped · jobs/_jd/founding-engineer-lattice.md</span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       DIRECTION 2 — TWO-PANE WORKBENCH  (sticky fit/status aside + working column)
+       ==================================================================== -->
+  <div class="dirhead">
+    <span class="n">Direction 2</span>
+    <h2>Two-Pane Workbench</h2>
+    <span class="tag">sticky decision aside · editable main</span>
+  </div>
+  <div class="rationale">
+    <b>Rationale.</b> A persistent left <b>decision aside</b> (identity, fit score, sub-scores, flags, status + apply) that stays put while you scroll; the right column is the working area — alignment narrative on top, then editable JD &amp; research below. The verdict and the status/apply controls are always one glance away, even deep in field-curation. <b>Mid-edit example</b> (comp band being edited, one field just saved).
+    <span class="trade"><b>Tradeoff:</b></span> the fixed aside costs ~18rem of width — the narrative and JD read in a narrower column; on small windows the aside collapses on top, losing the always-visible property.
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="rail__brand"><span class="star">✦</span> Lodestar</div>
+      <a class="navlink future"><span class="ico">○</span> Today</a>
+      <a class="navlink future"><span class="ico">▤</span> Triage</a>
+      <a class="navlink future"><span class="ico">⇄</span> Pipeline</a>
+      <a class="navlink on"><span class="ico">▣</span> Companies</a>
+      <a class="navlink future"><span class="ico">◴</span> Network</a>
+      <div class="rail__sep"></div><div class="rail__util">Diagnostics</div>
+      <a class="navlink future"><span class="ico">✚</span> Checks</a>
+    </nav>
+    <div class="app__content">
+      <div class="workspace">
+        <p class="crumbs"><a href="#">← Companies</a> / <a href="#">Lattice</a> / Staff Software Engineer</p>
+        <div class="d2-grid">
+          <!-- sticky decision aside -->
+          <aside class="d2-aside">
+            <div class="sec identity">
+              <h1 class="title" style="font-size:1.25rem">Staff Software Engineer, Platform</h1>
+              <p class="co"><a href="#">Lattice</a> · Senior · Remote (US)</p>
+            </div>
+            <div class="sec">
+              <div class="scoreline"><span class="fitbig good">71</span><span class="bandword" style="color:var(--good)">good fit</span></div>
+              <div class="subrow" style="margin-top:.55rem">
+                <div class="subline"><span>Seniority</span><div class="bar"><i style="width:100%"></i></div><span class="v">1.0</span></div>
+                <div class="subline"><span>Skills</span><div class="bar"><i class="lo" style="width:45%"></i></div><span class="v">.45</span></div>
+                <div class="subline"><span>Comp</span><div class="bar"><i style="width:75%"></i></div><span class="v">.75</span></div>
+                <div class="subline"><span>Arrangement</span><div class="bar"><i style="width:100%"></i></div><span class="v">1.0</span></div>
+                <div class="subline"><span>Domain</span><div class="bar"><i style="width:60%"></i></div><span class="v">.60</span></div>
+              </div>
+            </div>
+            <div class="sec">
+              <div class="flagrow"><span class="lvl chip warn">CAUTION</span><span class="det"><b>skills</b> — only 2 of 5 required matched (Go, k8s; missing Rust/Elixir).</span></div>
+            </div>
+            <div class="sec">
+              <div class="d2-statuspick"><span class="sub">Status</span> <span class="chip flat">Pursuing ▾</span></div>
+              <div style="margin-top:.5rem;display:flex;gap:.4rem;flex-wrap:wrap">
+                <a class="btn primary sm" href="#">Apply ↗</a>
+                <a class="btn sm" href="#">JD source ↗</a>
+              </div>
+            </div>
+          </aside>
+
+          <!-- working column -->
+          <div class="d2-main">
+            <div class="panel" style="margin-top:0">
+              <div class="panel__head" style="background:var(--primary);color:#fff;border-color:var(--primary)">Alignment analysis <span class="sub" style="color:#e9cdd8">qualitative</span></div>
+              <div class="panel__body notes">
+                <p>A solid-but-not-slam-dunk fit. The seniority and arrangement are a clean match, and the platform mandate plays to your strengths — <a class="wl" href="#">[[rewrote-ingestion-in-rust]]</a> is directly on point for the data-plane work described. The score's real drag is <b>skills</b> (.45): the stack is Go/Elixir-leaning and your depth is Rust/TS.</p>
+                <p>That gap is more cosmetic than fatal — Go is a weekend, not a year, for someone who's shipped systems at this level — but it's the thing they'll screen on, so lead with the transferable systems work and name Go directly rather than hoping they infer it. Comp tops at $240k, comfortably above your floor; no dealbreakers. Worth pursuing if the founding-engineer role doesn't land first.</p>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel__head">Structured JD <span class="sub">click a field to edit · saves on blur</span></div>
+              <div class="panel__body">
+                <dl class="meta-grid">
+                  <dt>Comp band</dt>
+                  <dd><span class="editline"><input type="text" value="200000" size="7"> – <input type="text" value="240000" size="7"> USD / yr</span></dd>
+                  <dt>Equity</dt><dd>—</dd>
+                  <dt>Remote</dt><dd><span class="savedtick">✓ saved</span> &nbsp;<select><option selected>Remote</option><option>Hybrid</option><option>Onsite</option></select></dd>
+                  <dt>YOE</dt><dd>10+ years</dd>
+                  <dt>Employment</dt><dd>Full-time</dd>
+                  <dt>Required</dt><dd><div class="skilltags"><span class="chip flat">Go</span><span class="chip flat">Elixir</span><span class="chip flat">Kubernetes</span><span class="chip flat">Postgres</span> <button class="linkbtn">+ edit</button></div></dd>
+                  <dt>Preferred</dt><dd><div class="skilltags"><span class="chip flat">Rust</span><span class="chip flat">gRPC</span></div></dd>
+                  <dt>Comp <span class="researched-tag">researched · low</span></dt><dd class="sub" style="font-family:var(--font-body)">band inferred from levels.fyi p50 for Series-F staff; verify.</dd>
+                </dl>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel__head">Research notes <span class="sub">provenance</span></div>
+              <div class="panel__body notes">
+                <p><b>Accepted</b></p>
+                <p style="margin:.2rem 0">• <b>comp_low / comp_high:</b> 200k–240k <span class="sub">(source: levels.fyi · confidence: low)</span></p>
+                <p><b>Rejected</b></p>
+                <p style="margin:.2rem 0">• <b>yoe_min:</b> rejected — no explicit minimum stated in JD.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================
+       DIRECTION 3 — TABBED DOSSIER  (header + tabbed body)  — DEALBROKEN
+       ==================================================================== -->
+  <div class="dirhead">
+    <span class="n">Direction 3</span>
+    <h2>Tabbed Dossier</h2>
+    <span class="tag">fixed header · tabbed body</span>
+  </div>
+  <div class="rationale">
+    <b>Rationale.</b> A compact always-visible header (identity, fit score, the 5 sub-scores inline, status + apply), then a tabbed body — <b>Alignment · JD &amp; data · Research · Raw JD</b> — so each concern gets full width and the page never gets long. Reuses the exact tab pattern the company workspace already uses, so it feels native. <b>Dealbroken (score 0) example</b>: the Alignment tab leads with the dealbreaker, and a banner makes the hard-no unmissable regardless of which tab is open.
+    <span class="trade"><b>Tradeoff:</b></span> tabs hide content behind clicks — you can't see the narrative and the JD at once, and the alignment (the most important thing) is one tab among equals rather than the default focus; risks under-weighting the verdict.
+  </div>
+
+  <div class="app">
+    <nav class="rail">
+      <div class="rail__brand"><span class="star">✦</span> Lodestar</div>
+      <a class="navlink future"><span class="ico">○</span> Today</a>
+      <a class="navlink future"><span class="ico">▤</span> Triage</a>
+      <a class="navlink future"><span class="ico">⇄</span> Pipeline</a>
+      <a class="navlink on"><span class="ico">▣</span> Companies</a>
+      <a class="navlink future"><span class="ico">◴</span> Network</a>
+      <div class="rail__sep"></div><div class="rail__util">Diagnostics</div>
+      <a class="navlink future"><span class="ico">✚</span> Checks</a>
+    </nav>
+    <div class="app__content">
+      <div class="workspace">
+        <p class="crumbs"><a href="#">← Companies</a> / <a href="#">Lattice</a> / Senior Engineer, Frontend</p>
+        <div class="d3-headbar identity">
+          <div class="fitmini"><div class="fitbig dead">0</div><div class="bandword" style="color:var(--danger)">dealbroken</div></div>
+          <div>
+            <h1 class="title">Senior Engineer, Frontend</h1>
+            <p class="co"><a href="#">Lattice</a> · Senior · Remote (US)</p>
+            <div class="d3-subscores">
+              <div class="s">Sen<b>.90</b><div class="bar"><i style="width:90%"></i></div></div>
+              <div class="s">Skl<b>.70</b><div class="bar"><i style="width:70%"></i></div></div>
+              <div class="s">Cmp<b>.00</b><div class="bar"><i class="lo" style="width:4%"></i></div></div>
+              <div class="s">Arr<b>1.0</b><div class="bar"><i style="width:100%"></i></div></div>
+              <div class="s">Dom<b>.60</b><div class="bar"><i style="width:60%"></i></div></div>
+              <div class="s" style="justify-content:center;color:var(--danger)">score<b style="color:var(--danger)">0</b><span class="sub" style="font-size:var(--fs-2xs)">forced</span></div>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="chip flat">Status: Skipped ▾</span>
+            <a class="btn sm" href="#">JD source ↗</a>
+          </div>
+        </div>
+
+        <!-- persistent dealbreaker banner — visible regardless of active tab -->
+        <div class="deadbanner"><b>⛔ Dealbreaker — comp.</b> Band tops out at $175k, below your $200k floor. A dealbreaker forces the score to 0; the sub-scores above are shown for context only.</div>
+
+        <div class="tabs" style="margin-top:var(--sp-3)">
+          <button class="tab on">Alignment</button>
+          <button class="tab">JD &amp; data</button>
+          <button class="tab">Research <span class="c">1</span></button>
+          <button class="tab">Raw JD</button>
+        </div>
+
+        <!-- Alignment tab (active) — leads with the dealbreaker -->
+        <div class="panel" style="margin-top:0">
+          <div class="panel__head">Alignment analysis</div>
+          <div class="panel__body notes">
+            <p>This is likely a pass, and the reason is comp: the band tops out at $175k against your $200k floor, so it's a hard no as the data stands — not a "consider it anyway." The one thing worth checking is whether the band is real: it was stated in the JD, not researched, and frontend bands at a Series-F company sometimes flex for a senior systems hire, but don't invest unless you have a reason to think it will.</p>
+            <p>For what it's worth, the rest reads fine — the seniority and remote arrangement match, and <a class="wl" href="#">[[design-system-platform]]</a> would make you credible here. But none of that overrides the floor. If you want to keep a door open, a one-line note asking whether the band has flexibility for a senior hire is the maximum effort this deserves right now.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel__head">Fit flags</div>
+          <div class="panel__body">
+            <div class="flagrow"><span class="lvl chip danger">DEALBREAKER</span><span class="det"><b>comp_floor</b> — band tops out at 175000, floor 200000.</span></div>
+            <div class="flagrow"><span class="lvl chip warn">CAUTION</span><span class="det"><b>domain</b> — HR Tech outside preferred domains.</span></div>
+          </div>
+        </div>
+        <p class="sub" style="margin-top:.6rem">Inactive tabs (JD &amp; data, Research, Raw JD) carry the structured fields + provenance; the banner above persists across all of them so the hard-no is never out of view.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

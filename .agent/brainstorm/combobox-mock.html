@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lodestar · Vesper — typeahead combobox + active-rail study</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Vesper trio: Bodoni Moda (display) · Lora (body) · Spline Sans (UI/controls) -->
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,600;6..96,700&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Spline+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
+<style>
+  *{box-sizing:border-box}
+
+  /* ============================================================
+     VESPER tokens — verbatim from theme-options-v3.html, Option C
+     ============================================================ */
+  :root{
+    --display:'Bodoni Moda',serif;
+    --body:'Lora',serif;
+    --ui:'Spline Sans',sans-serif;
+
+    --bg:#f1e9e4; --card:#fdf9f5; --card-hover:#f5ece6; --panel-head:#f6ebed;
+    --rail:#241921; --rail-ink:#bca7b3; --rail-hover:#33232f; --rail-active:#3a2834;
+    --rail-muted:#856f7d; --rail-sep:#382734;
+    --ink:#291d24; --ink-soft:#4b3a45; --muted:#75606c; --faint:#a890a0;
+    --line:#ebdde1; --wire:#dcc7cd;
+    --primary:#7d2348; --primary-hover:#691838; --primary-on-rail:#c06088; --primary-shadow:rgba(125,35,72,.5);
+    --accent:#b58320; --accent-ink:#8a6110; --accent-soft:#f4e7c5;
+    --good:#3c7a52; --good-soft:#daecdf;
+    --warn:#b8701a; --warn-soft:#f6e7c7;
+    --danger:#c23320; --danger-soft:#f7d9d3;
+    --flat-soft:#efe1e3; --mono-bg:#ecdde0; --mono-ink:#7a6470;
+
+    /* control geometry — the "raised" generous scale */
+    --r-sm:8px; --r-md:9px; --r-lg:13px; --r-pill:99px;
+    --ctl-fs:0.82rem;            /* control + option text */
+    --ctl-pad:.4rem .65rem;      /* comfortable control padding */
+    --primary-aubergine-soft:#f3dbe4; /* aubergine at ~14% — selected-row wash & rail active */
+  }
+
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;color:var(--ink);line-height:1.55;
+    font-family:var(--body);
+    background:
+      radial-gradient(120% 80% at 10% -10%, #f7efe9 0%, rgba(247,239,233,0) 55%),
+      radial-gradient(120% 90% at 100% 0%, #efe2e4 0%, rgba(239,226,228,0) 50%),
+      linear-gradient(180deg,#f2eae5 0%, #ece1dd 100%);
+    background-attachment:fixed;
+    padding:2.6rem 1.25rem 6rem;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+
+  /* -------- masthead -------- */
+  .kicker{font-family:var(--ui);font-size:.66rem;font-weight:700;letter-spacing:.32em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 .6rem}
+  h1.title{
+    font-family:var(--display);font-variation-settings:'opsz' 96;
+    font-weight:600;font-size:clamp(2.2rem,5.5vw,3.4rem);line-height:1.0;margin:0;letter-spacing:.004em;color:var(--ink);
+  }
+  h1.title em{font-style:italic;font-weight:500;color:var(--primary)}
+  .lede{font-family:var(--body);color:var(--muted);max-width:72ch;margin:1rem 0 0;font-size:.98rem}
+  .lede code{font-family:ui-monospace,'SF Mono',monospace;background:var(--flat-soft);padding:.05rem .34rem;border-radius:5px;font-size:.84em;color:var(--ink-soft)}
+  .rule{height:1px;background:linear-gradient(90deg,var(--wire) 0%,rgba(220,199,205,0) 80%);margin:1.5rem 0 0}
+
+  /* -------- section scaffolding -------- */
+  .sec{margin-top:2.6rem}
+  .sec > .sechd{display:flex;align-items:baseline;gap:.7rem;margin-bottom:.2rem}
+  .sec > .sechd h2{font-family:var(--display);font-variation-settings:'opsz' 60;font-weight:600;font-size:1.45rem;margin:0;color:var(--ink);letter-spacing:.003em}
+  .sec > .sechd .num{font-family:var(--ui);font-size:.7rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--accent-ink)}
+  .sec > .secsub{font-family:var(--body);color:var(--muted);font-size:.92rem;margin:.15rem 0 1.2rem;max-width:74ch}
+
+  .stage{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);
+    box-shadow:0 26px 54px -34px rgba(60,25,45,.5), 0 1px 0 rgba(255,255,255,.6) inset;
+    padding:1.6rem 1.5rem 1.7rem;position:relative;overflow:visible;
+  }
+  /* a soft paper grain to avoid flat-fill AI look */
+  .stage::before{content:"";position:absolute;inset:0;border-radius:var(--r-lg);pointer-events:none;
+    background-image:radial-gradient(rgba(125,35,72,.018) 1px,transparent 1px);background-size:4px 4px;}
+  .stage > *{position:relative}
+
+  .caption{font-family:var(--ui);font-size:.66rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin:0 0 .8rem}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:2.4rem}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr;gap:2rem}}
+
+  /* the field cluster as it appears on the Companies filter row */
+  .filterow{display:flex;flex-wrap:wrap;gap:.55rem;align-items:center}
+  .fl{font-family:var(--ui);font-size:.7rem;font-weight:600;letter-spacing:.02em;color:var(--muted);align-self:center;margin-right:.1rem}
+
+  /* ============================================================
+     THE COMBOBOX  (.cbx)
+     ============================================================ */
+  .cbx{position:relative;font-family:var(--ui);display:inline-block;min-width:13.5rem}
+  .cbx.wide{min-width:16rem}
+
+  /* --- closed control / trigger --- */
+  .cbx-trigger{
+    display:flex;align-items:center;gap:.5rem;width:100%;
+    font-family:var(--ui);font-size:var(--ctl-fs);font-weight:500;
+    padding:var(--ctl-pad);
+    background:var(--card);color:var(--ink);
+    border:1px solid var(--wire);border-radius:var(--r-md);
+    cursor:pointer;text-align:left;line-height:1.2;
+    transition:border-color .14s,box-shadow .14s,background .14s;
+  }
+  .cbx-trigger:hover{background:var(--card-hover);border-color:var(--primary)}
+  /* the value text; when placeholder/"any" it reads softer */
+  .cbx-trigger .lab{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cbx-trigger .lab .key{color:var(--muted);font-weight:600}        /* "Industry:" */
+  .cbx-trigger .lab .val{color:var(--ink);font-weight:600}          /* the chosen value */
+  .cbx-trigger.is-any .lab .val{color:var(--faint);font-weight:500;font-style:italic} /* "any" */
+  /* a small clear (×) that appears only when a value is set */
+  .cbx-trigger .clear{flex:none;width:1.05rem;height:1.05rem;border-radius:50%;display:grid;place-items:center;
+    color:var(--muted);font-size:.62rem;background:transparent;transition:background .12s,color .12s}
+  .cbx-trigger .clear:hover{background:var(--flat-soft);color:var(--primary)}
+  .cbx-trigger.is-any .clear{display:none}
+  /* chevron in aubergine */
+  .cbx-trigger .chev{flex:none;color:var(--primary);font-size:.66rem;transition:transform .16s ease}
+
+  /* focus / open states */
+  .cbx-trigger:focus-visible,
+  .cbx.open .cbx-trigger{
+    outline:none;border-color:var(--primary);
+    box-shadow:0 0 0 3px rgba(125,35,72,.16);
+    background:var(--card);
+  }
+  .cbx.open .cbx-trigger .chev{transform:rotate(180deg)}
+
+  /* --- the popover --- */
+  .cbx-pop{
+    position:absolute;z-index:40;top:calc(100% + .4rem);left:0;min-width:100%;width:max-content;max-width:22rem;
+    background:var(--card);border:1px solid var(--wire);border-radius:var(--r-lg);
+    box-shadow:0 1px 0 rgba(255,255,255,.7) inset, 0 18px 44px -16px rgba(40,15,30,.42), 0 4px 12px -8px rgba(40,15,30,.3);
+    overflow:hidden;
+    /* entrance */
+    transform-origin:top left;animation:pop .14s cubic-bezier(.2,.7,.3,1);
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(-4px) scale(.985)}to{opacity:1;transform:none}}
+
+  /* type-ahead input row inside the popover */
+  .cbx-search{display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem;border-bottom:1px solid var(--line);background:var(--panel-head)}
+  .cbx-search i{color:var(--primary);font-size:.74rem;flex:none}
+  .cbx-search input{
+    flex:1;min-width:0;border:none;background:transparent;outline:none;
+    font-family:var(--ui);font-size:var(--ctl-fs);font-weight:500;color:var(--ink);padding:.05rem 0;
+  }
+  .cbx-search input::placeholder{color:var(--faint);font-weight:400}
+  .cbx-search .kbd{font-family:var(--ui);font-size:.58rem;font-weight:600;letter-spacing:.04em;color:var(--faint);
+    border:1px solid var(--wire);border-radius:5px;padding:.04rem .26rem;background:var(--card);white-space:nowrap}
+
+  /* the option list */
+  .cbx-list{list-style:none;margin:0;padding:.3rem;max-height:16rem;overflow-y:auto;scrollbar-width:thin}
+  .cbx-list::-webkit-scrollbar{width:9px}
+  .cbx-list::-webkit-scrollbar-thumb{background:var(--wire);border-radius:99px;border:2px solid var(--card)}
+
+  .cbx-opt{
+    display:flex;align-items:center;gap:.55rem;
+    padding:.42rem .55rem .42rem .6rem;border-radius:var(--r-sm);
+    font-family:var(--ui);font-size:var(--ctl-fs);color:var(--ink-soft);font-weight:500;
+    cursor:pointer;position:relative;line-height:1.25;
+  }
+  /* the aubergine left-bar selected indicator (NOT a checkmark) */
+  .cbx-opt .bar{position:absolute;left:0;top:50%;transform:translateY(-50%);
+    width:3px;height:0;border-radius:99px;background:var(--primary);transition:height .12s}
+  .cbx-opt .otext{flex:1;min-width:0}
+  .cbx-opt .otext .raw{color:var(--faint);font-size:.7rem;font-weight:500;margin-left:.05rem} /* raw slug, dimmed */
+  /* matched-substring highlight: gold underlay, accent-ink text */
+  .cbx-opt mark{background:var(--accent-soft);color:var(--accent-ink);border-radius:3px;padding:0 .06em;font-weight:700}
+
+  /* active (keyboard / hover) option — aubergine-soft wash */
+  .cbx-opt:hover,
+  .cbx-opt.active{background:var(--primary-aubergine-soft);color:var(--ink)}
+  .cbx-opt.active{box-shadow:inset 0 0 0 1px rgba(125,35,72,.18)}
+
+  /* selected option — bold label + persistent aubergine left-bar + a small dot */
+  .cbx-opt.selected{color:var(--primary);font-weight:700}
+  .cbx-opt.selected .bar{height:1.1rem}
+  .cbx-opt.selected .raw{color:var(--primary);opacity:.65}
+  .cbx-opt .dot{flex:none;width:.42rem;height:.42rem;border-radius:50%;background:var(--primary);opacity:0;transition:opacity .12s}
+  .cbx-opt.selected .dot{opacity:1}
+
+  /* the special "any / clear" row pinned at the top of the list */
+  .cbx-opt.any{color:var(--muted);font-style:italic}
+  .cbx-opt.any i{color:var(--faint);font-size:.72rem;width:.9rem;text-align:center}
+  .cbx-opt.any.selected{color:var(--primary);font-style:italic;font-weight:700}
+  .cbx-sep{height:1px;background:var(--line);margin:.3rem .2rem}
+
+  /* no-matches empty state */
+  .cbx-empty{padding:1.15rem .8rem 1.3rem;text-align:center;color:var(--muted)}
+  .cbx-empty .ico{width:2.2rem;height:2.2rem;border-radius:50%;display:grid;place-items:center;margin:0 auto .5rem;
+    background:var(--flat-soft);color:var(--faint);font-size:.9rem}
+  .cbx-empty .ttl{font-family:var(--ui);font-size:.82rem;font-weight:600;color:var(--ink-soft)}
+  .cbx-empty .ttl q{color:var(--primary);font-style:normal;font-weight:700}
+  .cbx-empty .hint{font-family:var(--ui);font-size:.72rem;color:var(--faint);margin-top:.2rem}
+  .cbx-empty .clearbtn{margin-top:.7rem;font-family:var(--ui);font-size:.74rem;font-weight:600;color:var(--primary);
+    background:var(--primary-aubergine-soft);border:1px solid rgba(125,35,72,.2);border-radius:var(--r-pill);
+    padding:.26rem .7rem;cursor:pointer}
+  .cbx-empty .clearbtn:hover{background:#eccdd8}
+
+  /* a tiny footer count inside the popover */
+  .cbx-foot{display:flex;align-items:center;gap:.4rem;padding:.4rem .7rem;border-top:1px solid var(--line);
+    background:var(--panel-head);font-family:var(--ui);font-size:.66rem;color:var(--muted)}
+  .cbx-foot b{color:var(--ink-soft);font-weight:700}
+  .cbx-foot .spacer{flex:1}
+
+  /* ============================================================
+     NAV RAIL snippet
+     ============================================================ */
+  .railframe{display:grid;grid-template-columns:13rem 1fr;border-radius:var(--r-lg);overflow:hidden;
+    border:1px solid var(--line);box-shadow:0 22px 50px -34px rgba(60,25,45,.5)}
+  .rail{background:var(--rail);color:var(--rail-ink);padding:.85rem .6rem 1.1rem;font-family:var(--ui);font-size:var(--ctl-fs);
+    background-image:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.16))}
+  .brand{color:#fff;font-weight:700;padding:.25rem .55rem 1rem;display:flex;align-items:center;gap:.55rem}
+  .brand .star{color:var(--primary-on-rail);font-size:1.05rem}
+  .brand .bword{font-family:var(--display);font-variation-settings:'opsz' 40;font-weight:600;font-size:1.3rem;letter-spacing:.01em;line-height:1}
+  .nav a{display:flex;align-items:center;gap:.65rem;padding:.46rem .6rem;border-radius:var(--r-sm);color:var(--rail-ink);
+    text-decoration:none;margin-bottom:.16rem;font-size:var(--ctl-fs);font-weight:500;cursor:pointer;transition:background .12s,color .12s;position:relative}
+  .nav a i{width:1.1rem;text-align:center;font-size:.9rem;opacity:.82}
+  .nav a:hover{background:var(--rail-hover);color:#e9dde4}
+
+  /* ★ ACTIVE NAV ITEM — inverted aubergine-soft surface ★ */
+  .nav a.on{
+    background:var(--primary-aubergine-soft);          /* aubergine at ~14% — the inverted "card" on dark plum */
+    color:var(--primary);                              /* deep aubergine text on the soft surface */
+    font-weight:700;
+    box-shadow:inset 2px 0 0 var(--primary);           /* a crisp aubergine spine on the leading edge */
+  }
+  .nav a.on i{opacity:1;color:var(--primary)}          /* icon picks up full aubergine */
+
+  .rsep{height:1px;background:var(--rail-sep);margin:.7rem .45rem}
+  .util{font-family:var(--ui);font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:var(--rail-muted);padding:.35rem .6rem .2rem;font-weight:700}
+  .nav a.future{color:var(--rail-muted)}
+
+  .railside{background:var(--card);padding:1.3rem 1.4rem;font-family:var(--body)}
+  .railside h3{font-family:var(--display);font-variation-settings:'opsz' 40;font-weight:600;margin:0 0 .3rem;font-size:1.2rem;color:var(--ink)}
+  .railside p{color:var(--muted);font-size:.9rem;margin:.2rem 0 0;max-width:42ch}
+  .alttreat{margin-top:1rem;font-family:var(--ui);font-size:.74rem;color:var(--ink-soft)}
+  .alttreat code{font-family:ui-monospace,'SF Mono',monospace;background:var(--flat-soft);padding:.04rem .3rem;border-radius:4px;font-size:.92em;color:var(--ink-soft)}
+
+  /* ============================================================
+     legend / annotation chips
+     ============================================================ */
+  .ann{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.1rem}
+  .ann .a{display:flex;align-items:center;gap:.45rem;font-family:var(--ui);font-size:.72rem;color:var(--ink-soft);
+    background:var(--flat-soft);border:1px solid var(--line);border-radius:var(--r-pill);padding:.24rem .6rem}
+  .ann .a b{font-weight:700;color:var(--ink)}
+  .ann .a i{font-size:.7rem;color:var(--primary)}
+
+  .swstrip{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.4rem}
+  .sw{display:flex;align-items:center;gap:.36rem;font-family:ui-monospace,'SF Mono',monospace;font-size:.64rem;color:var(--muted);
+    background:var(--card);border:1px solid var(--line);border-radius:7px;padding:.22rem .42rem .22rem .28rem}
+  .sw i{width:.9rem;height:.9rem;border-radius:4px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+
+  .footnote{font-family:var(--body);color:var(--muted);font-size:.84rem;margin-top:1.7rem;max-width:80ch}
+  .footnote code{font-family:ui-monospace,'SF Mono',monospace;background:var(--flat-soft);padding:.05rem .32rem;border-radius:5px;font-size:.86em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ MASTHEAD ============ -->
+  <header>
+    <p class="kicker">Lodestar · Vesper · component study</p>
+    <h1 class="title">A typeahead <em>combobox</em>, dressed for evening</h1>
+    <p class="lede">
+      A single reusable control to replace every native <code>&lt;select&gt;</code> in Lodestar — the home
+      <b>Status / Industry / Remote / Size / Stage</b> filters, the company-detail <b>Status</b> control, and the
+      <b>Size / Stage / Remote</b> selects in the create form. Each is <b>single-select with an "any" default</b>. Options carry a
+      humanized <b>label</b> over a raw <code>slug</code>, plus optional <code>aliases</code> so typing
+      <q style="font-style:normal;color:var(--primary);font-weight:600">fintech</q> still finds <b>Financial Services</b>. Type to filter on
+      label, slug, <em>or</em> alias; the matched run is highlighted in gold.
+    </p>
+    <div class="rule"></div>
+  </header>
+
+  <!-- ============ 1 · CLOSED CONTROLS ============ -->
+  <section class="sec">
+    <div class="sechd"><span class="num">01</span><h2>Closed — the resting filter row</h2></div>
+    <p class="secsub">Reads unmistakably as an interactive dropdown: bordered pill, aubergine chevron, value-or-placeholder. Two are set
+      (Status, Remote) and show a clear (×); three rest on their italic "any" default.</p>
+
+    <div class="stage">
+      <p class="caption">Companies · filter row</p>
+      <div class="filterow">
+        <span class="fl">Filter</span>
+
+        <!-- SET value -->
+        <div class="cbx">
+          <button class="cbx-trigger" aria-haspopup="listbox" aria-expanded="false">
+            <span class="lab"><span class="key">Status:&nbsp;</span><span class="val">Researching</span></span>
+            <span class="clear" role="button" aria-label="Clear Status" title="Clear"><i class="fa-solid fa-xmark"></i></span>
+            <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+          </button>
+        </div>
+
+        <!-- ANY default -->
+        <div class="cbx">
+          <button class="cbx-trigger is-any" aria-haspopup="listbox" aria-expanded="false">
+            <span class="lab"><span class="key">Industry:&nbsp;</span><span class="val">any</span></span>
+            <span class="clear" aria-hidden="true"><i class="fa-solid fa-xmark"></i></span>
+            <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+          </button>
+        </div>
+
+        <!-- SET value -->
+        <div class="cbx">
+          <button class="cbx-trigger" aria-haspopup="listbox" aria-expanded="false">
+            <span class="lab"><span class="key">Remote:&nbsp;</span><span class="val">Fully remote</span></span>
+            <span class="clear" role="button" aria-label="Clear Remote" title="Clear"><i class="fa-solid fa-xmark"></i></span>
+            <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+          </button>
+        </div>
+
+        <!-- ANY defaults -->
+        <div class="cbx">
+          <button class="cbx-trigger is-any" aria-haspopup="listbox" aria-expanded="false">
+            <span class="lab"><span class="key">Size:&nbsp;</span><span class="val">any</span></span>
+            <span class="clear" aria-hidden="true"><i class="fa-solid fa-xmark"></i></span>
+            <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+          </button>
+        </div>
+        <div class="cbx">
+          <button class="cbx-trigger is-any" aria-haspopup="listbox" aria-expanded="false">
+            <span class="lab"><span class="key">Stage:&nbsp;</span><span class="val">any</span></span>
+            <span class="clear" aria-hidden="true"><i class="fa-solid fa-xmark"></i></span>
+            <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="ann">
+        <span class="a"><i class="fa-solid fa-circle"></i><b>Set:</b> value in ink + a hover-able × clear</span>
+        <span class="a"><i class="fa-regular fa-circle"></i><b>Any:</b> italic faint placeholder, no ×</span>
+        <span class="a"><i class="fa-solid fa-chevron-down"></i>chevron always aubergine</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2 · OPEN + MID-TYPEAHEAD ============ -->
+  <section class="sec">
+    <div class="sechd"><span class="num">02</span><h2>Open — mid-typeahead, with a match</h2></div>
+    <p class="secsub">The popover is a fully-owned surface (never the native menu). A search input sits at the top; below it, filtered
+      options with the matched run highlighted in gold. The currently-selected option keeps its aubergine left-bar, dot, and bold weight
+      even while filtering. Hover/keyboard-active rows wash aubergine-soft.</p>
+
+    <div class="stage">
+      <p class="caption">Industry · open · query <q style="font-style:normal;color:var(--accent-ink);font-weight:700">fin</q></p>
+
+      <!-- show two side by side: the live open popover, and the keyboard model -->
+      <div class="grid2">
+        <div>
+          <!-- The trigger that is currently open -->
+          <div class="cbx open wide" style="position:relative">
+            <button class="cbx-trigger" aria-haspopup="listbox" aria-expanded="true" aria-controls="lb-industry">
+              <span class="lab"><span class="key">Industry:&nbsp;</span><span class="val">Financial Services</span></span>
+              <span class="clear" role="button" aria-label="Clear Industry"><i class="fa-solid fa-xmark"></i></span>
+              <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+            </button>
+
+            <!-- popover rendered open & in flow so it shows in the static mock -->
+            <div class="cbx-pop" style="position:relative;top:.4rem;animation:none">
+              <div class="cbx-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input value="fin" aria-label="Filter Industry" aria-autocomplete="list" aria-controls="lb-industry" />
+                <span class="kbd">↑↓ move · ↵ select · esc</span>
+              </div>
+              <ul class="cbx-list" id="lb-industry" role="listbox" aria-label="Industry">
+                <!-- any/clear pinned -->
+                <li class="cbx-opt any" role="option" aria-selected="false">
+                  <i class="fa-solid fa-asterisk"></i><span class="otext">Industry: any <span class="raw">(clear filter)</span></span>
+                </li>
+                <div class="cbx-sep"></div>
+
+                <!-- matched on LABEL -->
+                <li class="cbx-opt selected active" role="option" aria-selected="true" id="opt-fs">
+                  <span class="bar"></span>
+                  <span class="otext"><mark>Fin</mark>ancial Services <span class="raw">financial_services · fintech</span></span>
+                  <span class="dot"></span>
+                </li>
+                <!-- matched on ALIAS (label doesn't contain "fin"; alias does) -->
+                <li class="cbx-opt" role="option" aria-selected="false">
+                  <span class="bar"></span>
+                  <span class="otext">Insurance <span class="raw">insurance · <mark>fin</mark>tech-adjacent</span></span>
+                  <span class="dot"></span>
+                </li>
+                <!-- matched on SLUG -->
+                <li class="cbx-opt" role="option" aria-selected="false">
+                  <span class="bar"></span>
+                  <span class="otext">Personal Finance <span class="raw">personal_<mark>fin</mark>ance</span></span>
+                  <span class="dot"></span>
+                </li>
+                <!-- matched on LABEL mid-word -->
+                <li class="cbx-opt" role="option" aria-selected="false">
+                  <span class="bar"></span>
+                  <span class="otext">Crowd<mark>fin</mark>ancing <span class="raw">crowdfinancing</span></span>
+                  <span class="dot"></span>
+                </li>
+              </ul>
+              <div class="cbx-foot"><b>4</b>&nbsp;of 31 industries<span class="spacer"></span>matched on label · slug · alias</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- annotation column -->
+        <div style="font-family:var(--ui);font-size:.82rem;color:var(--ink-soft);align-self:start;padding-top:.2rem">
+          <p style="margin:.1rem 0 .8rem;font-weight:700;color:var(--ink)">What each row demonstrates</p>
+          <ul style="margin:0;padding-left:1.1rem;line-height:1.7">
+            <li><b style="color:var(--primary)">Financial Services</b> — the <em>selected</em> option: aubergine spine + dot + bold. Matched on its <b>label</b>.</li>
+            <li><b>Insurance</b> — matched only on its <b>alias</b> <code style="font-family:ui-monospace;background:var(--flat-soft);padding:0 .25rem;border-radius:3px">fintech-adjacent</code>; the alias text carries the highlight.</li>
+            <li><b>Personal Finance</b> — matched on its <b>raw slug</b> <code style="font-family:ui-monospace;background:var(--flat-soft);padding:0 .25rem;border-radius:3px">personal_finance</code>.</li>
+            <li><b>Crowdfinancing</b> — substring match mid-label; not just prefix.</li>
+          </ul>
+          <p style="margin:.9rem 0 0;color:var(--muted)">The gold <mark style="background:var(--accent-soft);color:var(--accent-ink);border-radius:3px;padding:0 .1em;font-weight:700">mark</mark> shows
+            exactly <em>why</em> a row survived the filter — even when the reason is the hidden slug or alias, not the visible label.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 · NO MATCHES ============ -->
+  <section class="sec">
+    <div class="sechd"><span class="num">03</span><h2>No matches — the empty state</h2></div>
+    <p class="secsub">When the query filters everything out, the list yields to a calm, on-theme empty card. The pinned "any" row is
+      gone (it's not a match either); a single tap clears the query.</p>
+
+    <div class="stage">
+      <p class="caption">Status · open · query <q style="font-style:normal;color:var(--accent-ink);font-weight:700">zzz</q></p>
+      <div class="cbx open" style="position:relative">
+        <button class="cbx-trigger" aria-haspopup="listbox" aria-expanded="true">
+          <span class="lab"><span class="key">Status:&nbsp;</span><span class="val">Researching</span></span>
+          <span class="clear" role="button" aria-label="Clear Status"><i class="fa-solid fa-xmark"></i></span>
+          <span class="chev"><i class="fa-solid fa-chevron-down"></i></span>
+        </button>
+        <div class="cbx-pop" style="position:relative;top:.4rem;animation:none">
+          <div class="cbx-search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input value="zzz" aria-label="Filter Status" />
+            <span class="kbd">esc to close</span>
+          </div>
+          <div class="cbx-empty">
+            <div class="ico"><i class="fa-solid fa-wine-glass-empty"></i></div>
+            <div class="ttl">No status matches <q>"zzz"</q></div>
+            <div class="hint">Tried label, slug, and aliases.</div>
+            <button class="clearbtn"><i class="fa-solid fa-arrow-rotate-left" style="font-size:.66rem;margin-right:.3rem"></i>Clear search</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4 · NAV RAIL ============ -->
+  <section class="sec">
+    <div class="sechd"><span class="num">04</span><h2>Active nav-rail treatment</h2></div>
+    <p class="secsub">On the dark-plum rail (<code>--rail #241921</code>), the active item inverts to an <b>aubergine-soft surface</b> with
+      deep-aubergine text and a crisp aubergine spine on the leading edge — a lit "you-are-here" plaque against the dark.</p>
+
+    <div class="railframe">
+      <nav class="rail">
+        <div class="brand"><i class="fa-solid fa-compass star"></i><span class="bword">Lodestar</span></div>
+        <a class="future"><i class="fa-solid fa-sun"></i> Today</a>
+        <a class="future"><i class="fa-solid fa-layer-group"></i> Triage</a>
+        <a class="future"><i class="fa-solid fa-diagram-project"></i> Pipeline</a>
+        <a class="on" aria-current="page"><i class="fa-solid fa-building"></i> Companies</a>
+        <a class="future"><i class="fa-solid fa-user-group"></i> Network</a>
+        <a class="future"><i class="fa-solid fa-chart-line"></i> Patterns</a>
+        <div class="rsep"></div><div class="util">Diagnostics</div>
+        <a class="future"><i class="fa-solid fa-heart-pulse"></i> Checks</a>
+      </nav>
+      <div class="railside">
+        <h3>Companies</h3>
+        <p>The active item reads as a small lit surface set into the dark rail — not just a tint, not an OS-blue bar.</p>
+        <div class="alttreat">
+          <b>Spec:</b> background <code>--primary-aubergine-soft #f3dbe4</code>, text + icon <code>--primary #7d2348</code>,
+          weight 700, plus <code>box-shadow: inset 2px 0 0 var(--primary)</code> as the spine.<br>
+          <span style="color:var(--muted)">Hover (inactive) stays subtle: <code>--rail-hover #33232f</code>.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ token strip ============ -->
+  <section class="sec">
+    <div class="sechd"><span class="num">05</span><h2>Tokens in play</h2></div>
+    <div class="swstrip">
+      <span class="sw"><i style="background:#fdf9f5"></i>card</span>
+      <span class="sw"><i style="background:#f5ece6"></i>card-hover</span>
+      <span class="sw"><i style="background:#f6ebed"></i>panel-head</span>
+      <span class="sw"><i style="background:#dcc7cd"></i>wire</span>
+      <span class="sw"><i style="background:#ebdde1"></i>line</span>
+      <span class="sw"><i style="background:#7d2348"></i>primary</span>
+      <span class="sw"><i style="background:#691838"></i>primary-hover</span>
+      <span class="sw"><i style="background:#f3dbe4"></i>aubergine-soft</span>
+      <span class="sw"><i style="background:#b58320"></i>accent</span>
+      <span class="sw"><i style="background:#f4e7c5"></i>accent-soft</span>
+      <span class="sw"><i style="background:#8a6110"></i>accent-ink</span>
+      <span class="sw"><i style="background:#241921"></i>rail</span>
+      <span class="sw"><i style="background:#291d24"></i>ink</span>
+      <span class="sw"><i style="background:#75606c"></i>muted</span>
+      <span class="sw"><i style="background:#a890a0"></i>faint</span>
+    </div>
+    <p class="footnote">
+      <b>Note:</b> <code>--primary-aubergine-soft #f3dbe4</code> is the one new token this component introduces — aubergine at ~14% over paper.
+      It does double duty: the active-row wash inside the popover and the inverted active nav-rail surface. Everything else is drawn from
+      the existing Vesper palette. Controls, options, and the search input are all <b>Spline Sans</b> at <code>0.82rem</code>; company names
+      and headings elsewhere remain Bodoni Moda, prose remains Lora.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>
