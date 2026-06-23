@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { companiesStore as cs } from "$lib/companies.svelte";
-  import { getCheck, type Check, type Step } from "$lib/check";
+  import { getCheck, formatCache, type Check, type Step } from "$lib/check";
   import { runSpend } from "$lib/spend";
 
   let check = $state<Check | null>(null);
@@ -57,13 +57,14 @@
       </thead>
       <tbody>
         {#each check.steps as s, i (i)}
+          {@const cache = formatCache(s)}
           <tr class={s.status === "failed" ? "steps-row--failed" : ""}>
             <td>{s.stage}</td>
             <td>{s.class}</td>
             <td>{s.target}</td>
             <td>{s.status}</td>
             <td>{s.attempts}</td>
-            <td>{fmtCost(s)}</td>
+            <td>{fmtCost(s)}{#if cache} <span class="step-cache">{cache}</span>{/if}</td>
             <td>{s.error ?? ""}</td>
           </tr>
         {/each}

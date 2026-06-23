@@ -14,6 +14,33 @@ export interface Step {
   finished_at: string | null;
   error: string | null;
   cost: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+}
+
+/**
+ * Format cache activity for a step. Returns "" when both fields are null (the common case
+ * — scrape/script steps and LLM steps that did not engage caching). When tokens are present,
+ * returns a compact indicator showing read count (primary signal) and write count if present.
+ *
+ * Examples:
+ *   null/null  → ""
+ *   read=6656, write=null  → "· cache 6,656 read"
+ *   read=6656, write=7000  → "· cache 6,656 read · 7,000 write"
+ *   read=null, write=7000  → "· cache 7,000 write"   (cold-cache first call)
+ */
+export function formatCache(s: Pick<Step, "cache_read_tokens" | "cache_write_tokens">): string {
+  if (s.cache_read_tokens == null && s.cache_write_tokens == null) return "";
+  // "cache" labels the whole indicator once, so a write-only step (the cold-cache first call,
+  // where only the prefix is written and nothing is read) still reads as cache activity.
+  const parts: string[] = [];
+  if (s.cache_read_tokens != null) {
+    parts.push(`${s.cache_read_tokens.toLocaleString("en-US")} read`);
+  }
+  if (s.cache_write_tokens != null) {
+    parts.push(`${s.cache_write_tokens.toLocaleString("en-US")} write`);
+  }
+  return "· cache " + parts.join(" · ");
 }
 
 /** Run-level rollup for the Checks run table (no steps). */

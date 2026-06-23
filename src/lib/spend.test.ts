@@ -12,6 +12,8 @@ const step = (cls: string, cost: number | null): Step => ({
   finished_at: null,
   error: null,
   cost,
+  cache_read_tokens: null,
+  cache_write_tokens: null,
 });
 
 describe("runSpend", () => {
