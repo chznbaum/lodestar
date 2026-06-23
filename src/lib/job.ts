@@ -88,3 +88,45 @@ export function updateJobField(
 ): Promise<void> {
   return invoke("update_job_field", { vaultPath, slug, field, value });
 }
+
+/** Write a list field on the job note. Mirrors `set_job_list_field` (backend). */
+export function setJobListField(
+  vaultPath: string,
+  slug: string,
+  field: string,
+  values: string[],
+): Promise<void> {
+  return invoke("set_job_list_field", { vaultPath, slug, field, values });
+}
+
+// ---------------------------------------------------------------------------
+// Enum value constants for inline-edit selects.
+// Mirrors src-tauri/src/job.rs constants verbatim (EMPLOYMENT_TYPES, COMP_PERIODS,
+// REMOTE_KINDS, SPONSORSHIP, VALID_LEVELS).
+// ---------------------------------------------------------------------------
+
+/** mirrors src-tauri/src/job.rs EMPLOYMENT_TYPES */
+export const EMPLOYMENT_TYPES = [
+  "full_time",
+  "part_time",
+  "contract",
+  "fractional",
+  "internship",
+  "temporary",
+] as const;
+
+/** mirrors src-tauri/src/job.rs COMP_PERIODS */
+export const COMP_PERIODS = [
+  "annual",
+  "hourly",
+  "daily",
+  "monthly",
+  "weekly",
+  "biweekly",
+] as const;
+
+/** mirrors src-tauri/src/job.rs REMOTE_KINDS */
+export const REMOTE_KINDS = ["remote", "hybrid", "onsite"] as const;
+
+/** mirrors src-tauri/src/job.rs SPONSORSHIP (used for visa_sponsorship + relocation) */
+export const SPONSORSHIP = ["offered", "not_offered", "unspecified"] as const;

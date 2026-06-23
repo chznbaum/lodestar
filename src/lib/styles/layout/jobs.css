@@ -1,0 +1,244 @@
+/* Job-detail route — Decision Brief (.jobs layout block).
+ * BEM: .jobs, .jobs__header, .jobs__score, .jobs__identity, .jobs__chips,
+ *       .jobs__status-ctrl, .jobs__actions, .jobs__anomaly-warn,
+ *       .jobs__breakdown, .jobs__subscore-list, .jobs__subrow, .jobs__sublabel,
+ *       .jobs__bar-track, .jobs__bar-fill, .jobs__subval, .jobs__fitflags,
+ *       .jobs__fitflags-head, .jobs__hero, .jobs__section, .jobs__jd-brief,
+ *       .jobs__rawpath, .jobs__field-val, .jobs__researched.
+ * Band color modifiers: .band--good, .band--warn, .band--danger, .band--unscored.
+ * Tokens only — no hardcoded colors. Squared corners throughout (--r-* = 0).
+ * Atoms reused at-name: .chip, .btn, .linkbtn, .panel, .panel__head,
+ *   .panel__body, .meta-grid, .notes, .crumbs. */
+
+/* ── page wrapper ── */
+.jobs {
+  padding: 1rem var(--sp-content) 1.2rem;
+  max-width: var(--content-max);
+}
+
+/* ── breadcrumbs (reuse .crumbs from workspace.css via shared block) ──
+ * The .crumbs class is defined in workspace.css and the anchor style there
+ * handles links; no duplication needed here. */
+
+/* ── header ── */
+.jobs__header {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--sp-3);
+  align-items: start;
+  margin: var(--sp-3) 0 var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* Score block */
+.jobs__score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 3rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.jobs__score-num {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-2xl);
+  line-height: 1;
+}
+
+.jobs__score-band {
+  font-size: var(--fs-2xs);
+  text-transform: lowercase;
+  letter-spacing: 0.01em;
+  margin-top: 0.15rem;
+  color: var(--muted);
+}
+
+/* Band color modifier — applied to the score block and sub-score values */
+.band--good    .jobs__score-num,
+.band--good    .jobs__subval { color: var(--good); }
+.band--warn    .jobs__score-num,
+.band--warn    .jobs__subval { color: var(--warn); }
+.band--danger  .jobs__score-num,
+.band--danger  .jobs__subval { color: var(--danger); }
+.band--unscored .jobs__score-num,
+.band--unscored .jobs__subval { color: var(--faint); }
+
+/* Bar fill colors */
+.jobs__bar-fill.band--good    { background: var(--good); }
+.jobs__bar-fill.band--warn    { background: var(--warn); }
+.jobs__bar-fill.band--danger  { background: var(--danger); }
+.jobs__bar-fill.band--unscored { background: var(--faint); }
+
+/* Identity block */
+.jobs__identity {
+  min-width: 0;
+}
+
+/* .jobs__title is an <h1>: font comes from global h1 default (elements.css);
+ * only layout here. */
+.jobs__title {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.jobs__meta {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  margin: 0.2rem 0 0;
+}
+
+.jobs__meta a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.jobs__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* Status control */
+.jobs__status-ctrl {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.jobs__anomaly-warn {
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  max-width: 20rem;
+  margin: 0;
+}
+
+/* External action buttons */
+.jobs__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+/* ── fit breakdown ── */
+.jobs__subscore-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.jobs__subrow {
+  display: grid;
+  grid-template-columns: 6rem 1fr 2.2rem;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.jobs__sublabel {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.jobs__bar-track {
+  height: 0.35rem;
+  background: var(--line);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.jobs__bar-fill {
+  height: 100%;
+  border-radius: 0;
+  background: var(--accent);
+  transition: width 0.2s var(--ease);
+}
+
+.jobs__subval {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: right;
+  font-family: var(--font-sans);
+}
+
+/* Fit flags subsection */
+.jobs__fitflags {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.jobs__fitflags-head {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 var(--sp-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── hero (alignment narrative) ── */
+.jobs__hero .notes {
+  font-size: var(--fs-md);
+}
+
+/* ── collapsible sections ── */
+.jobs__section .panel__head {
+  cursor: default;
+}
+
+/* ── JD brief subsection ── */
+.jobs__jd-brief {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+/* ── raw JD path ── */
+.jobs__rawpath {
+  font-family: monospace;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  word-break: break-all;
+  margin: 0 0 var(--sp-2);
+}
+
+/* ── inline field edit ── */
+.jobs__field-val {
+  /* linkbtn already handles base; override to allow wrapping text */
+  white-space: normal;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  color: var(--ink);
+}
+
+.jobs__field-val:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* Researched provenance marker */
+.jobs__researched {
+  font-size: var(--fs-xs);
+  color: var(--accent-ink);
+  margin-left: var(--sp-2);
+}
+
+/* ── hint / error states ── */
+.jobs .hint {
+  color: var(--faint);
+  font-size: var(--fs-sm);
+}
+
+.jobs .error {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}

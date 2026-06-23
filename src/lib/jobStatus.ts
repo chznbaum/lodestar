@@ -44,3 +44,32 @@ export function isKnownStatus(
   if (status === null) return false;
   return (JOB_STATUSES as readonly string[]).includes(status);
 }
+
+/**
+ * Return the legal human-settable transition targets from the given current status.
+ * Mirrors the backend `set_job_status` transition rules exactly:
+ *   new      → [skipped]
+ *   detailed → [skipped]
+ *   scored   → [selected, skipped]
+ *   selected → [applied]
+ *   applied  → []  (terminal)
+ *   skipped  → []  (terminal)
+ *   null / unknown → []  (anomaly — frontend must show a warning, offer no transitions)
+ */
+export function nextHumanStatuses(current: string | null): string[] {
+  switch (current) {
+    case "new":
+    case "detailed":
+      return ["skipped"];
+    case "scored":
+      return ["selected", "skipped"];
+    case "selected":
+      return ["applied"];
+    case "applied":
+    case "skipped":
+      return [];
+    default:
+      // null or unknown — anomaly
+      return [];
+  }
+}

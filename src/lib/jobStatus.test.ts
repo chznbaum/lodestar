@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STATUS_LABELS, classifyStatus, isKnownStatus } from "./jobStatus";
+import { STATUS_LABELS, classifyStatus, isKnownStatus, nextHumanStatuses } from "./jobStatus";
 import { JOB_STATUSES } from "./job";
 
 describe("STATUS_LABELS", () => {
@@ -83,5 +83,43 @@ describe("isKnownStatus", () => {
 
   it("returns false for null", () => {
     expect(isKnownStatus(null)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nextHumanStatuses — mirrors backend set_job_status transition rules exactly
+// ---------------------------------------------------------------------------
+
+describe("nextHumanStatuses", () => {
+  it("new → [skipped]", () => {
+    expect(nextHumanStatuses("new")).toEqual(["skipped"]);
+  });
+
+  it("detailed → [skipped]", () => {
+    expect(nextHumanStatuses("detailed")).toEqual(["skipped"]);
+  });
+
+  it("scored → [selected, skipped]", () => {
+    expect(nextHumanStatuses("scored")).toEqual(["selected", "skipped"]);
+  });
+
+  it("selected → [applied]", () => {
+    expect(nextHumanStatuses("selected")).toEqual(["applied"]);
+  });
+
+  it("applied → [] (terminal)", () => {
+    expect(nextHumanStatuses("applied")).toEqual([]);
+  });
+
+  it("skipped → [] (terminal)", () => {
+    expect(nextHumanStatuses("skipped")).toEqual([]);
+  });
+
+  it("null → [] (anomaly — no transitions)", () => {
+    expect(nextHumanStatuses(null)).toEqual([]);
+  });
+
+  it("unknown string → [] (anomaly — no transitions)", () => {
+    expect(nextHumanStatuses("garbage")).toEqual([]);
   });
 });
