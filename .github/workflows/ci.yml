@@ -12,6 +12,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: "24"
+
 jobs:
   frontend:
     name: Frontend (Vitest + svelte-check)
@@ -20,9 +23,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # `.svelte-kit/` is gitignored. `svelte-kit sync` regenerates it (incl. the tsconfig that
+      # ./tsconfig.json extends) so the type-check has what it needs on a fresh checkout.
+      - name: Sync SvelteKit
+        run: npx svelte-kit sync
       - name: Unit tests
         run: npm test
       - name: Type-check
@@ -38,13 +45,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `tauri::generate_context!()` embeds the built frontend at compile time, so `../build`
-      # must exist before clippy/test can compile the crate.
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - name: Build frontend (for generate_context!)
+      # `tauri::generate_context!()` embeds the built frontend at compile time. Neither `.svelte-kit/`
+      # nor `build/` is committed, so build the SPA on a fresh checkout before any cargo step —
+      # `vite build` runs `svelte-kit sync` and writes the static output to `build/` (frontendDist).
+      - name: Build frontend (creates ../build for generate_context!)
         working-directory: .
         run: |
           npm ci
