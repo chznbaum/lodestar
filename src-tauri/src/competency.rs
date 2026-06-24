@@ -31,7 +31,10 @@ fn parse_competency(slug: &str, text: &str) -> Result<Competency, String> {
 }
 
 pub fn list_competencies(vault_path: &str) -> Result<Vec<Competency>, String> {
-    note::read_notes_in(&Path::new(vault_path).join("competencies"), parse_competency)
+    note::read_notes_in(
+        &Path::new(vault_path).join("competencies"),
+        parse_competency,
+    )
 }
 
 pub struct CompetencyIndex {
@@ -77,11 +80,11 @@ mod tests {
             },
         ];
         let idx = CompetencyIndex::build(&comps);
-        assert!(idx.matches("a11y"));           // alias
-        assert!(idx.matches("Accessibility"));  // name
-        assert!(idx.matches("accessibility"));  // slug / case-insensitive
-        assert!(idx.matches("Ruby on Rails"));  // multi-word name
-        assert!(idx.matches("rails"));          // alias case-insensitive
-        assert!(!idx.matches("Cobol"));         // unknown
+        assert!(idx.matches("a11y")); // alias
+        assert!(idx.matches("Accessibility")); // name
+        assert!(idx.matches("accessibility")); // slug / case-insensitive
+        assert!(idx.matches("Ruby on Rails")); // multi-word name
+        assert!(idx.matches("rails")); // alias case-insensitive
+        assert!(!idx.matches("Cobol")); // unknown
     }
 }

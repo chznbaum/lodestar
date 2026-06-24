@@ -84,7 +84,9 @@ impl SqliteQueue {
             UPDATE tasks SET state='pending' WHERE state='claimed';",
         )
         .map_err(|e| e.to_string())?;
-        Ok(SqliteQueue { conn: Mutex::new(conn) })
+        Ok(SqliteQueue {
+            conn: Mutex::new(conn),
+        })
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
@@ -170,7 +172,11 @@ impl Queue for SqliteQueue {
     fn pending_count(&self) -> Result<usize, String> {
         let n: i64 = self
             .lock()?
-            .query_row("SELECT COUNT(*) FROM tasks WHERE state='pending'", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE state='pending'",
+                [],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
         Ok(n as usize)
     }
@@ -280,7 +286,10 @@ mod tests {
         q.enqueue(new("run-b", "s1")).unwrap();
 
         let removed = q.discard_run_tasks("run-a").unwrap();
-        assert_eq!(removed, 2, "both of run-a's outstanding tasks are discarded");
+        assert_eq!(
+            removed, 2,
+            "both of run-a's outstanding tasks are discarded"
+        );
 
         // run-b's task is untouched and still claimable; run-a's are gone.
         let t = q.claim_next().unwrap().expect("run-b's task remains");

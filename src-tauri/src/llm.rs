@@ -181,10 +181,17 @@ fn parse_or_response(text: &str) -> Result<LlmResponse, String> {
         .as_ref()
         .and_then(|u| u.cost)
         .map(|c| (c * 1_000_000.0).round() as i64);
-    let details = usage.as_ref().and_then(|u| u.prompt_tokens_details.as_ref());
+    let details = usage
+        .as_ref()
+        .and_then(|u| u.prompt_tokens_details.as_ref());
     let cache_read_tokens = details.and_then(|d| d.cached_tokens);
     let cache_write_tokens = details.and_then(|d| d.cache_write_tokens);
-    Ok(LlmResponse { content, cost_micro_usd, cache_read_tokens, cache_write_tokens })
+    Ok(LlmResponse {
+        content,
+        cost_micro_usd,
+        cache_read_tokens,
+        cache_write_tokens,
+    })
 }
 
 #[cfg(test)]
@@ -211,9 +218,18 @@ pub mod tests {
 
     #[test]
     fn fake_echoes_reply_and_cost() {
-        let l = FakeLlm { reply: "[]".into(), cost_micro_usd: 10_000 }; // $0.01
+        let l = FakeLlm {
+            reply: "[]".into(),
+            cost_micro_usd: 10_000,
+        }; // $0.01
         let r = l
-            .complete(&LlmRequest { model: "m".into(), system: "s".into(), user: "u".into(), web: false, cached_prefix: None })
+            .complete(&LlmRequest {
+                model: "m".into(),
+                system: "s".into(),
+                user: "u".into(),
+                web: false,
+                cached_prefix: None,
+            })
             .unwrap();
         assert_eq!(r.content, "[]");
         assert_eq!(r.cost_micro_usd, Some(10_000));
@@ -222,9 +238,18 @@ pub mod tests {
     #[test]
     fn fake_works_with_web_true() {
         // FakeLlm must ignore web entirely — same reply regardless.
-        let l = FakeLlm { reply: "ok".into(), cost_micro_usd: 0 };
+        let l = FakeLlm {
+            reply: "ok".into(),
+            cost_micro_usd: 0,
+        };
         let r = l
-            .complete(&LlmRequest { model: "m".into(), system: "s".into(), user: "u".into(), web: true, cached_prefix: None })
+            .complete(&LlmRequest {
+                model: "m".into(),
+                system: "s".into(),
+                user: "u".into(),
+                web: true,
+                cached_prefix: None,
+            })
             .unwrap();
         assert_eq!(r.content, "ok");
     }
@@ -233,25 +258,48 @@ pub mod tests {
 
     #[test]
     fn build_or_body_no_web_has_no_tools_key() {
-        let req = LlmRequest { model: "some/model".into(), system: "sys".into(), user: "usr".into(), web: false, cached_prefix: None };
+        let req = LlmRequest {
+            model: "some/model".into(),
+            system: "sys".into(),
+            user: "usr".into(),
+            web: false,
+            cached_prefix: None,
+        };
         let body = build_or_body(&req);
         assert_eq!(body["model"], "some/model");
         // Non-web body must NOT contain a tools key.
-        assert!(body.get("tools").is_none(), "web:false body must not include a tools key");
+        assert!(
+            body.get("tools").is_none(),
+            "web:false body must not include a tools key"
+        );
         // Must not contain tool_choice either (only meaningful when tools are present).
-        assert!(body.get("tool_choice").is_none(), "web:false body must not include a tool_choice key");
+        assert!(
+            body.get("tool_choice").is_none(),
+            "web:false body must not include a tool_choice key"
+        );
         // Must not contain plugins key either (deprecated path, never used).
-        assert!(body.get("plugins").is_none(), "web:false body must not include a plugins key");
+        assert!(
+            body.get("plugins").is_none(),
+            "web:false body must not include a plugins key"
+        );
         // Messages must be present.
         assert!(body["messages"].is_array());
     }
 
     #[test]
     fn build_or_body_web_true_includes_openrouter_web_search_tool() {
-        let req = LlmRequest { model: "some/model".into(), system: "sys".into(), user: "usr".into(), web: true, cached_prefix: None };
+        let req = LlmRequest {
+            model: "some/model".into(),
+            system: "sys".into(),
+            user: "usr".into(),
+            web: true,
+            cached_prefix: None,
+        };
         let body = build_or_body(&req);
         // Must include a tools array.
-        let tools = body["tools"].as_array().expect("web:true body must have a tools array");
+        let tools = body["tools"]
+            .as_array()
+            .expect("web:true body must have a tools array");
         assert_eq!(tools.len(), 1, "exactly one tool entry");
         assert_eq!(
             tools[0]["type"].as_str().unwrap(),
@@ -266,7 +314,10 @@ pub mod tests {
             "web:true body must set tool_choice to auto"
         );
         // Must NOT include legacy plugins key.
-        assert!(body.get("plugins").is_none(), "web:true body must not use deprecated plugins key");
+        assert!(
+            body.get("plugins").is_none(),
+            "web:true body must not use deprecated plugins key"
+        );
         // Model and messages still present.
         assert_eq!(body["model"], "some/model");
         assert!(body["messages"].is_array());
@@ -274,7 +325,13 @@ pub mod tests {
 
     #[test]
     fn build_or_body_messages_embed_system_and_user() {
-        let req = LlmRequest { model: "m".into(), system: "SYSTEM_CONTENT".into(), user: "USER_CONTENT".into(), web: false, cached_prefix: None };
+        let req = LlmRequest {
+            model: "m".into(),
+            system: "SYSTEM_CONTENT".into(),
+            user: "USER_CONTENT".into(),
+            web: false,
+            cached_prefix: None,
+        };
         let body = build_or_body(&req);
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(msgs.len(), 2);
@@ -310,8 +367,14 @@ pub mod tests {
 
         // User content is a multipart array.
         assert_eq!(msgs[1]["role"], "user");
-        let parts = msgs[1]["content"].as_array().expect("user content must be a multipart array");
-        assert_eq!(parts.len(), 2, "exactly two parts: cached prefix + per-job suffix");
+        let parts = msgs[1]["content"]
+            .as_array()
+            .expect("user content must be a multipart array");
+        assert_eq!(
+            parts.len(),
+            2,
+            "exactly two parts: cached prefix + per-job suffix"
+        );
 
         // Part 0: the cached prefix, with the ephemeral 1h breakpoint.
         assert_eq!(parts[0]["type"], "text");
@@ -335,15 +398,27 @@ pub mod tests {
     fn build_or_body_cached_prefix_none_emits_plain_string_no_cache_control() {
         // Regression guard for the other 3 builders: with cached_prefix None the user content is a
         // plain JSON string exactly as before, and no cache_control key appears anywhere.
-        let req = LlmRequest { model: "m".into(), system: "SYS".into(), user: "USR".into(), web: false, cached_prefix: None };
+        let req = LlmRequest {
+            model: "m".into(),
+            system: "SYS".into(),
+            user: "USR".into(),
+            web: false,
+            cached_prefix: None,
+        };
         let body = build_or_body(&req);
         let msgs = body["messages"].as_array().unwrap();
         // User content is a plain string (current behavior), not an array.
-        assert!(msgs[1]["content"].is_string(), "user content must stay a plain string when cached_prefix is None");
+        assert!(
+            msgs[1]["content"].is_string(),
+            "user content must stay a plain string when cached_prefix is None"
+        );
         assert_eq!(msgs[1]["content"], "USR");
         // No cache_control anywhere in the serialized body.
         let serialized = serde_json::to_string(&body).unwrap();
-        assert!(!serialized.contains("cache_control"), "no cache_control key may appear when cached_prefix is None");
+        assert!(
+            !serialized.contains("cache_control"),
+            "no cache_control key may appear when cached_prefix is None"
+        );
     }
 
     #[test]
@@ -359,15 +434,22 @@ pub mod tests {
         };
         let body = build_or_body(&req);
         // Tools array unaffected.
-        let tools = body["tools"].as_array().expect("web:true body must have a tools array");
+        let tools = body["tools"]
+            .as_array()
+            .expect("web:true body must have a tools array");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], "openrouter:web_search");
         assert_eq!(body["tool_choice"], "auto");
         // User content is the multipart cached array.
         let msgs = body["messages"].as_array().unwrap();
-        let parts = msgs[1]["content"].as_array().expect("user content must be multipart with cached_prefix");
+        let parts = msgs[1]["content"]
+            .as_array()
+            .expect("user content must be multipart with cached_prefix");
         assert_eq!(parts[0]["text"], "PREFIX");
-        assert_eq!(parts[0]["cache_control"], serde_json::json!({"type": "ephemeral", "ttl": "1h"}));
+        assert_eq!(
+            parts[0]["cache_control"],
+            serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+        );
     }
 
     // ── usage cache-telemetry parse tests ─────────────────────────────────────

@@ -40,7 +40,10 @@ fn entry(key: &'static str) -> Result<keyring::Entry, String> {
 pub fn set_secret_value(key: &str, value: &str) -> Result<(), String> {
     let k = canonical(key)?;
     entry(k)?.set_password(value).map_err(|e| e.to_string())?;
-    cache().lock().map_err(|e| e.to_string())?.insert(k, value.to_string());
+    cache()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(k, value.to_string());
     Ok(())
 }
 
@@ -52,7 +55,10 @@ pub fn get_secret(key: &str) -> Result<String, String> {
         return Ok(v.clone());
     }
     let v = entry(k)?.get_password().map_err(|e| e.to_string())?;
-    cache().lock().map_err(|e| e.to_string())?.insert(k, v.clone());
+    cache()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(k, v.clone());
     Ok(v)
 }
 

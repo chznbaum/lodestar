@@ -75,9 +75,24 @@ fn is_hidden(el: &scraper::node::Element) -> bool {
 fn is_block(name: &str) -> bool {
     matches!(
         name,
-        "p" | "div" | "li" | "ul" | "ol" | "br" | "tr" | "table" | "section"
-            | "article" | "header" | "footer" | "nav"
-            | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+        "p" | "div"
+            | "li"
+            | "ul"
+            | "ol"
+            | "br"
+            | "tr"
+            | "table"
+            | "section"
+            | "article"
+            | "header"
+            | "footer"
+            | "nav"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
     )
 }
 
@@ -92,7 +107,12 @@ fn normalize(s: &str) -> String {
 
 fn strip_zero_width(s: &str) -> String {
     s.chars()
-        .filter(|c| !matches!(*c, '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}' | '\u{feff}'))
+        .filter(|c| {
+            !matches!(
+                *c,
+                '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}' | '\u{feff}'
+            )
+        })
         .collect()
 }
 
@@ -102,7 +122,11 @@ fn strip_zero_width(s: &str) -> String {
 /// the structure-listings LLM copy a real URL instead of fabricating one.
 fn resolve_href(href: &str, base_url: &str) -> Option<String> {
     let h = href.trim();
-    if h.is_empty() || h.starts_with('#') || h.starts_with("javascript:") || h.starts_with("mailto:") {
+    if h.is_empty()
+        || h.starts_with('#')
+        || h.starts_with("javascript:")
+        || h.starts_with("mailto:")
+    {
         return None;
     }
     if h.starts_with("http://") || h.starts_with("https://") {

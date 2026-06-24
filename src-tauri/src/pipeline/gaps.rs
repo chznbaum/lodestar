@@ -144,22 +144,64 @@ mod tests {
         let gaps = detect_gaps(&job);
 
         // Set fields must NOT appear.
-        assert!(!gaps.contains(&"comp_low".to_string()), "comp_low should not be a gap");
-        assert!(!gaps.contains(&"remote".to_string()), "remote should not be a gap");
-        assert!(!gaps.contains(&"tech_stack".to_string()), "tech_stack should not be a gap");
+        assert!(
+            !gaps.contains(&"comp_low".to_string()),
+            "comp_low should not be a gap"
+        );
+        assert!(
+            !gaps.contains(&"remote".to_string()),
+            "remote should not be a gap"
+        );
+        assert!(
+            !gaps.contains(&"tech_stack".to_string()),
+            "tech_stack should not be a gap"
+        );
 
         // Several empty fields MUST appear.
-        assert!(gaps.contains(&"visa_sponsorship".to_string()), "visa_sponsorship should be a gap");
-        assert!(gaps.contains(&"comp_currency".to_string()), "comp_currency should be a gap");
-        assert!(gaps.contains(&"countries".to_string()), "countries should be a gap");
-        assert!(gaps.contains(&"comp_high".to_string()), "comp_high should be a gap");
-        assert!(gaps.contains(&"comp_period".to_string()), "comp_period should be a gap");
-        assert!(gaps.contains(&"comp_equity".to_string()), "comp_equity should be a gap");
-        assert!(gaps.contains(&"location_constraints".to_string()), "location_constraints should be a gap");
-        assert!(gaps.contains(&"relocation".to_string()), "relocation should be a gap");
-        assert!(gaps.contains(&"employment_type".to_string()), "employment_type should be a gap");
-        assert!(gaps.contains(&"yoe_min".to_string()), "yoe_min should be a gap");
-        assert!(gaps.contains(&"reports_to".to_string()), "reports_to should be a gap");
+        assert!(
+            gaps.contains(&"visa_sponsorship".to_string()),
+            "visa_sponsorship should be a gap"
+        );
+        assert!(
+            gaps.contains(&"comp_currency".to_string()),
+            "comp_currency should be a gap"
+        );
+        assert!(
+            gaps.contains(&"countries".to_string()),
+            "countries should be a gap"
+        );
+        assert!(
+            gaps.contains(&"comp_high".to_string()),
+            "comp_high should be a gap"
+        );
+        assert!(
+            gaps.contains(&"comp_period".to_string()),
+            "comp_period should be a gap"
+        );
+        assert!(
+            gaps.contains(&"comp_equity".to_string()),
+            "comp_equity should be a gap"
+        );
+        assert!(
+            gaps.contains(&"location_constraints".to_string()),
+            "location_constraints should be a gap"
+        );
+        assert!(
+            gaps.contains(&"relocation".to_string()),
+            "relocation should be a gap"
+        );
+        assert!(
+            gaps.contains(&"employment_type".to_string()),
+            "employment_type should be a gap"
+        );
+        assert!(
+            gaps.contains(&"yoe_min".to_string()),
+            "yoe_min should be a gap"
+        );
+        assert!(
+            gaps.contains(&"reports_to".to_string()),
+            "reports_to should be a gap"
+        );
         assert!(gaps.contains(&"team".to_string()), "team should be a gap");
     }
 

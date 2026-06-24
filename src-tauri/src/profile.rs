@@ -117,7 +117,9 @@ pub fn parse_target_criteria(text: &str) -> Result<TargetCriteria, String> {
 }
 
 pub fn read_target_criteria(vault_path: &str) -> Result<TargetCriteria, String> {
-    let p = Path::new(vault_path).join("profile").join("target_criteria.md");
+    let p = Path::new(vault_path)
+        .join("profile")
+        .join("target_criteria.md");
     let text = std::fs::read_to_string(&p).map_err(|e| format!("read {p:?}: {e}"))?;
     parse_target_criteria(&text)
 }
@@ -138,7 +140,9 @@ pub struct Accomplishment {
 /// Returns headline, body, and demonstrates competency slugs for each note.
 /// Used as context for the qualitative `alignment` step.
 pub fn list_accomplishments(vault_path: &str) -> Result<Vec<Accomplishment>, String> {
-    let dir = Path::new(vault_path).join("profile").join("accomplishments");
+    let dir = Path::new(vault_path)
+        .join("profile")
+        .join("accomplishments");
     let mut out = crate::note::read_notes_in(&dir, |slug, text| {
         #[derive(Deserialize)]
         struct AccFront {
@@ -148,7 +152,11 @@ pub fn list_accomplishments(vault_path: &str) -> Result<Vec<Accomplishment>, Str
         }
         let (fm, body) = split_frontmatter(text);
         let f: AccFront = serde_yaml::from_str(fm).map_err(|e| format!("{slug}: {e}"))?;
-        let demonstrates = f.demonstrates.iter().map(|d| crate::note::strip_wikilink(d)).collect();
+        let demonstrates = f
+            .demonstrates
+            .iter()
+            .map(|d| crate::note::strip_wikilink(d))
+            .collect();
         Ok(Accomplishment {
             slug: slug.to_string(),
             headline: f.headline.unwrap_or_default().trim().to_string(),
@@ -199,7 +207,10 @@ mod tests {
     #[test]
     fn non_remote_work_arrangements_parses() {
         let c = parse_target_criteria("---\nwork_arrangements: [hybrid, onsite]\n---\n").unwrap();
-        assert_eq!(c.work_arrangements, vec!["hybrid".to_string(), "onsite".to_string()]);
+        assert_eq!(
+            c.work_arrangements,
+            vec!["hybrid".to_string(), "onsite".to_string()]
+        );
     }
 
     #[test]
@@ -218,12 +229,18 @@ mod tests {
         assert_eq!(c.fit_weights.comp, 25);
         assert_eq!(c.fit_weights.arrangement, 0);
         assert_eq!(c.fit_weights.domain, 10);
-        let sum = c.fit_weights.seniority + c.fit_weights.skills + c.fit_weights.comp
-            + c.fit_weights.arrangement + c.fit_weights.domain;
+        let sum = c.fit_weights.seniority
+            + c.fit_weights.skills
+            + c.fit_weights.comp
+            + c.fit_weights.arrangement
+            + c.fit_weights.domain;
         assert_eq!(sum, 100, "fit_weights must sum to 100; got {sum}");
         assert_eq!(
             c.target_titles,
-            vec!["Founding Engineer".to_string(), "Senior Software Engineer".to_string()]
+            vec![
+                "Founding Engineer".to_string(),
+                "Senior Software Engineer".to_string()
+            ]
         );
     }
 
@@ -250,10 +267,7 @@ mod tests {
         let c = parse_target_criteria("---\ntype: target_criteria\n---\n").unwrap();
         let w = &c.fit_weights;
         let sum = w.seniority + w.skills + w.comp + w.arrangement + w.domain;
-        assert_eq!(
-            sum, 100,
-            "default weights sum to {sum}, not 100"
-        );
+        assert_eq!(sum, 100, "default weights sum to {sum}, not 100");
         assert!(c.target_levels.is_empty()); // safe defaults
     }
 
@@ -265,7 +279,10 @@ mod tests {
         assert_eq!(w.comp, 30);
         assert_eq!(w.arrangement, 15);
         assert_eq!(w.domain, 10);
-        assert_eq!(w.seniority + w.skills + w.comp + w.arrangement + w.domain, 100);
+        assert_eq!(
+            w.seniority + w.skills + w.comp + w.arrangement + w.domain,
+            100
+        );
     }
 
     // ── list_accomplishments ───────────────────────────────────────────────────
@@ -296,14 +313,19 @@ mod tests {
         assert_eq!(got[1].headline, "Shipped Zeta end to end.");
         assert_eq!(got[1].body, "We shipped the Zeta platform under budget.");
         // demonstrates slugs stripped of wikilinks
-        assert_eq!(got[1].demonstrates, vec!["rust".to_string(), "distributed-systems".to_string()]);
+        assert_eq!(
+            got[1].demonstrates,
+            vec!["rust".to_string(), "distributed-systems".to_string()]
+        );
     }
 
     #[test]
     fn list_accomplishments_missing_dir_is_empty() {
         let dir = std::env::temp_dir().join(format!("lodestar-acc-none-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
-        assert!(list_accomplishments(dir.to_str().unwrap()).unwrap().is_empty());
+        assert!(list_accomplishments(dir.to_str().unwrap())
+            .unwrap()
+            .is_empty());
     }
 
     // ── read_positioning ────────────────────────────────────────────────────────
@@ -322,7 +344,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert!(body.contains("## Primary narrative"));
         assert!(body.contains("I'm a founding engineer."));
-        assert!(!body.contains("type: positioning"), "frontmatter leaked: {body}");
+        assert!(
+            !body.contains("type: positioning"),
+            "frontmatter leaked: {body}"
+        );
     }
 
     #[test]
@@ -336,10 +361,7 @@ mod tests {
             !c.target_levels.is_empty(),
             "target_levels must be non-empty; got empty"
         );
-        assert!(
-            c.comp_floor.is_some(),
-            "comp_floor must be Some; got None"
-        );
+        assert!(c.comp_floor.is_some(), "comp_floor must be Some; got None");
         assert!(
             !c.work_arrangements.is_empty(),
             "work_arrangements must be non-empty; got empty"
@@ -353,8 +375,13 @@ mod tests {
         println!("work_arrangements: {:?}", c.work_arrangements);
         println!("work_authorization: {:?}", c.work_authorization);
         println!("target_titles: {:?}", c.target_titles);
-        println!("fit_weights: seniority={} skills={} comp={} arrangement={} domain={}",
-            c.fit_weights.seniority, c.fit_weights.skills, c.fit_weights.comp,
-            c.fit_weights.arrangement, c.fit_weights.domain);
+        println!(
+            "fit_weights: seniority={} skills={} comp={} arrangement={} domain={}",
+            c.fit_weights.seniority,
+            c.fit_weights.skills,
+            c.fit_weights.comp,
+            c.fit_weights.arrangement,
+            c.fit_weights.domain
+        );
     }
 }

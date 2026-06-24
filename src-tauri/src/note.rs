@@ -54,7 +54,10 @@ fn canonical(path: &Path) -> PathBuf {
 /// fence is the closing delimiter. Not a general YAML parser.
 /// Split a note into (frontmatter_yaml, body). Returns ("", whole) if no frontmatter.
 pub fn split_frontmatter(text: &str) -> (&str, &str) {
-    let after = match text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n")) {
+    let after = match text
+        .strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"))
+    {
         Some(rest) => rest,
         None => return ("", text),
     };
@@ -76,7 +79,10 @@ pub fn set_frontmatter_field(text: &str, key: &str, value: &str) -> Result<Strin
     let mut lines: Vec<String> = head.lines().map(String::from).collect();
     let prefix = format!("{key}:");
     let line = format!("{key}: {value}");
-    match lines.iter().position(|l| l.trim_start().starts_with(&prefix)) {
+    match lines
+        .iter()
+        .position(|l| l.trim_start().starts_with(&prefix))
+    {
         Some(i) => lines[i] = line,
         None => lines.push(line),
     }
@@ -88,7 +94,10 @@ pub fn set_frontmatter_field(text: &str, key: &str, value: &str) -> Result<Strin
 pub fn set_body(text: &str, body: &str) -> Result<String, String> {
     let i = text.find("\n---").ok_or("no frontmatter")?;
     let after = &text[i + 1..]; // "---...body"
-    let close_end = after.find('\n').map(|n| i + 1 + n + 1).unwrap_or(text.len());
+    let close_end = after
+        .find('\n')
+        .map(|n| i + 1 + n + 1)
+        .unwrap_or(text.len());
     Ok(format!("{}\n{}\n", text[..close_end].trim_end(), body))
 }
 
@@ -146,7 +155,9 @@ pub fn sanitize_typed_fields(
     use serde_yaml::Value;
     let mut warnings = Vec::new();
     for &f in int_fields {
-        let Some(v) = map.get(f).cloned() else { continue };
+        let Some(v) = map.get(f).cloned() else {
+            continue;
+        };
         match v {
             Value::Null => {}
             Value::Number(n) if n.as_i64().is_some() => {}
@@ -157,25 +168,33 @@ pub fn sanitize_typed_fields(
                 } else if let Ok(n) = t.parse::<i64>() {
                     map.insert(Value::from(f), Value::from(n));
                 } else {
-                    warnings.push(format!("field {f} had non-integer value {s:?}; treated as empty"));
+                    warnings.push(format!(
+                        "field {f} had non-integer value {s:?}; treated as empty"
+                    ));
                     map.remove(f);
                 }
             }
             other => {
-                warnings.push(format!("field {f} had non-integer value {other:?}; treated as empty"));
+                warnings.push(format!(
+                    "field {f} had non-integer value {other:?}; treated as empty"
+                ));
                 map.remove(f);
             }
         }
     }
     for &f in list_fields {
-        let Some(v) = map.get(f).cloned() else { continue };
+        let Some(v) = map.get(f).cloned() else {
+            continue;
+        };
         match v {
             Value::Null | Value::Sequence(_) => {}
             Value::String(s) if s.trim().is_empty() => {
                 map.remove(f);
             }
             other => {
-                warnings.push(format!("field {f} had non-list value {other:?}; treated as empty"));
+                warnings.push(format!(
+                    "field {f} had non-list value {other:?}; treated as empty"
+                ));
                 map.remove(f);
             }
         }
@@ -327,8 +346,8 @@ mod tests {
             "{braces}",
             "#hash",
             "quote\"inside",
-            "123",        // numeric-looking text must stay a string
-            "true",       // YAML bool keyword must stay a string
+            "123",  // numeric-looking text must stay a string
+            "true", // YAML bool keyword must stay a string
             "null",
             "  spaced  ", // leading/trailing spaces preserved
             "- dash",
@@ -340,7 +359,11 @@ mod tests {
             let doc = format!("k: {enc}\n");
             let m: std::collections::HashMap<String, String> = serde_yaml::from_str(&doc)
                 .unwrap_or_else(|e| panic!("value {v:?} encoded as {enc:?} did not parse: {e}"));
-            assert_eq!(m.get("k").map(String::as_str), Some(v), "round-trip failed (enc {enc:?})");
+            assert_eq!(
+                m.get("k").map(String::as_str),
+                Some(v),
+                "round-trip failed (enc {enc:?})"
+            );
         }
         assert!(yaml_scalar("has\nnewline").is_err());
     }
@@ -415,9 +438,11 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         // Missing dir -> empty Vec, never an error.
         let missing = std::path::Path::new("/no/such/lodestar/dir");
-        assert!(read_notes_in(missing, |s, _| Ok::<_, String>(s.to_string()))
-            .unwrap()
-            .is_empty());
+        assert!(
+            read_notes_in(missing, |s, _| Ok::<_, String>(s.to_string()))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -439,9 +464,18 @@ mod tests {
         write_note(&p, "---\nid: x\n---\n").unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "---\nid: x\n---\n"); // it really wrote
 
-        assert!(was_self_write(&p), "our own write is recognized as a self-write");
-        assert!(!was_self_write(&p), "the record is consumed — a later edit is NOT suppressed");
-        assert!(!was_self_write(&dir.join("never.md")), "a path we never wrote is never a self-write");
+        assert!(
+            was_self_write(&p),
+            "our own write is recognized as a self-write"
+        );
+        assert!(
+            !was_self_write(&p),
+            "the record is consumed — a later edit is NOT suppressed"
+        );
+        assert!(
+            !was_self_write(&dir.join("never.md")),
+            "a path we never wrote is never a self-write"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

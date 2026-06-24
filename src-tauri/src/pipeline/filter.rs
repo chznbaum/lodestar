@@ -71,7 +71,11 @@ mod tests {
         }
     }
     fn listing(t: &str, u: &str, loc: Option<&str>) -> RawListing {
-        RawListing { title: t.into(), url: u.into(), location: loc.map(String::from) }
+        RawListing {
+            title: t.into(),
+            url: u.into(),
+            location: loc.map(String::from),
+        }
     }
 
     #[test]
@@ -93,13 +97,16 @@ mod tests {
         let mut existing = HashSet::new();
         existing.insert("u1".to_string());
         let ls = vec![
-            listing("Software Engineer", "u1", Some("Remote")),       // known url -> drop
+            listing("Software Engineer", "u1", Some("Remote")), // known url -> drop
             listing("Software Engineer", "u2", Some("New York, NY")), // onsite -> KEPT
-            listing("AI Engineer", "u3", None),                       // unknown loc -> KEPT
-            listing("AI Engineer", "u4", Some("Remote (US)")),        // remote -> KEPT
+            listing("AI Engineer", "u3", None),                 // unknown loc -> KEPT
+            listing("AI Engineer", "u4", Some("Remote (US)")),  // remote -> KEPT
         ];
         let kept = prefilter(ls, &crit(), &existing);
-        assert_eq!(kept.iter().map(|l| l.url.as_str()).collect::<Vec<_>>(), vec!["u2", "u3", "u4"]);
+        assert_eq!(
+            kept.iter().map(|l| l.url.as_str()).collect::<Vec<_>>(),
+            vec!["u2", "u3", "u4"]
+        );
     }
 
     #[test]
@@ -113,6 +120,9 @@ mod tests {
             listing("Software Engineer", "u1", Some("Remote")), // dup of the first by url
         ];
         let kept = prefilter(ls, &crit(), &HashSet::new());
-        assert_eq!(kept.iter().map(|l| l.url.as_str()).collect::<Vec<_>>(), vec!["u1", "u2"]);
+        assert_eq!(
+            kept.iter().map(|l| l.url.as_str()).collect::<Vec<_>>(),
+            vec!["u1", "u2"]
+        );
     }
 }

@@ -33,7 +33,12 @@ pub(crate) struct StepIdentity<'a> {
 impl<'a> StepIdentity<'a> {
     /// Convenience constructor so call sites read `StepIdentity::new(stage, class, target, started)`.
     pub fn new(stage: &'a str, class: &'a str, target: &'a str, started_at: String) -> Self {
-        Self { stage, class, target, started_at }
+        Self {
+            stage,
+            class,
+            target,
+            started_at,
+        }
     }
 }
 
@@ -85,7 +90,10 @@ impl StepOutcome {
     /// A warned step: status `"warning"`, error `None`, recording the (non-empty) warnings. Asserts
     /// at least one warning, matching the old `record_step_warned`/`record_llm_step_warned` guard.
     pub fn warned(warnings: Vec<String>, cost: Option<i64>) -> Self {
-        debug_assert!(!warnings.is_empty(), "StepOutcome::warned requires at least one warning");
+        debug_assert!(
+            !warnings.is_empty(),
+            "StepOutcome::warned requires at least one warning"
+        );
         Self {
             status: "warning",
             error: None,
@@ -100,7 +108,11 @@ impl StepOutcome {
     /// path). Observability only — proves the prompt cache is engaging; `cost` already nets the
     /// discount. Used only by llm steps that cache (alignment today); everything else leaves the
     /// defaults (`None`).
-    pub fn with_cache(mut self, cache_read_tokens: Option<i64>, cache_write_tokens: Option<i64>) -> Self {
+    pub fn with_cache(
+        mut self,
+        cache_read_tokens: Option<i64>,
+        cache_write_tokens: Option<i64>,
+    ) -> Self {
         self.cache_read_tokens = cache_read_tokens;
         self.cache_write_tokens = cache_write_tokens;
         self
@@ -153,7 +165,8 @@ pub fn run_scrape_step<S: Scraper>(
         Ok(result) => {
             let cost = result.credits.map(|c| c as i64);
             record_step(
-                vault_path, run_id,
+                vault_path,
+                run_id,
                 StepIdentity::new(stage, "scrape", target, started),
                 StepOutcome::ok(cost),
             )
@@ -166,7 +179,8 @@ pub fn run_scrape_step<S: Scraper>(
         }
         Err(e) => {
             record_step(
-                vault_path, run_id,
+                vault_path,
+                run_id,
                 StepIdentity::new(stage, "scrape", target, started),
                 StepOutcome::failed(e.to_string(), None),
             )
@@ -211,10 +225,18 @@ mod tests {
         let vault = dir.to_str().unwrap().to_string();
         open_run(&vault);
 
-        let scraper = FakeScraper { content: "<p>x</p>".into(), credits: 5 };
+        let scraper = FakeScraper {
+            content: "<p>x</p>".into(),
+            credits: 5,
+        };
         let result = run_scrape_step(
-            &vault, "2026-06-17-0001", "https://stripe.com/careers", "stripe",
-            "careers-scrape", ProxyTier::Premium, &scraper,
+            &vault,
+            "2026-06-17-0001",
+            "https://stripe.com/careers",
+            "stripe",
+            "careers-scrape",
+            ProxyTier::Premium,
+            &scraper,
         )
         .unwrap();
         assert_eq!(result.content, "<p>x</p>"); // content flows to the next stage
@@ -245,8 +267,13 @@ mod tests {
             }
         }
         let err = run_scrape_step(
-            &vault, "2026-06-17-0001", "https://x", "stripe",
-            "careers-scrape", ProxyTier::Premium, &FailScraper,
+            &vault,
+            "2026-06-17-0001",
+            "https://x",
+            "stripe",
+            "careers-scrape",
+            ProxyTier::Premium,
+            &FailScraper,
         )
         .unwrap_err();
         assert!(err.to_string().contains("403"));
@@ -254,7 +281,11 @@ mod tests {
         let reread = get_check(vault, "2026-06-17-0001".into()).unwrap();
         assert_eq!(reread.steps.len(), 1);
         assert_eq!(reread.steps[0].status, "failed");
-        assert!(reread.steps[0].error.as_deref().unwrap_or("").contains("403"));
+        assert!(reread.steps[0]
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("403"));
         assert_eq!(reread.steps[0].cost, None);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -276,7 +307,8 @@ mod tests {
             "missing equity field".to_string(),
         ];
         let step = record_step(
-            &vault, "2026-06-17-0001",
+            &vault,
+            "2026-06-17-0001",
             StepIdentity::new("research-gaps", "llm", "stripe", started),
             StepOutcome::warned(warnings.clone(), Some(1_000)),
         )
@@ -301,14 +333,21 @@ mod tests {
     fn record_llm_step_persists_cache_tokens() {
         // The llm recording path must persist cache read/write counts onto the appended Step,
         // readable back through parse_check.
-        let dir = std::env::temp_dir().join(format!("lodestar-runner-llmcache-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("lodestar-runner-llmcache-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("checks")).unwrap();
         let vault = dir.to_str().unwrap().to_string();
         open_run(&vault);
 
         record_step(
-            &vault, "2026-06-17-0001",
-            StepIdentity::new("alignment", "llm", "stripe", "2026-06-23T10:00:00".to_string()),
+            &vault,
+            "2026-06-17-0001",
+            StepIdentity::new(
+                "alignment",
+                "llm",
+                "stripe",
+                "2026-06-23T10:00:00".to_string(),
+            ),
             StepOutcome::ok(Some(4_200)).with_cache(Some(6_600), Some(7_000)),
         )
         .unwrap();
@@ -324,14 +363,23 @@ mod tests {
     #[test]
     fn record_llm_step_warned_persists_cache_tokens() {
         // The warned llm path must carry both the warnings and the cache tokens.
-        let dir = std::env::temp_dir().join(format!("lodestar-runner-llmwarncache-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "lodestar-runner-llmwarncache-{}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(dir.join("checks")).unwrap();
         let vault = dir.to_str().unwrap().to_string();
         open_run(&vault);
 
         record_step(
-            &vault, "2026-06-17-0001",
-            StepIdentity::new("alignment", "llm", "stripe", "2026-06-23T10:00:00".to_string()),
+            &vault,
+            "2026-06-17-0001",
+            StepIdentity::new(
+                "alignment",
+                "llm",
+                "stripe",
+                "2026-06-23T10:00:00".to_string(),
+            ),
             StepOutcome::warned(vec!["narrative truncated".into()], Some(4_200))
                 .with_cache(Some(6_600), None),
         )
@@ -340,7 +388,10 @@ mod tests {
         let reread = get_check(vault, "2026-06-17-0001".into()).unwrap();
         assert_eq!(reread.steps.len(), 1);
         assert_eq!(reread.steps[0].status, "warning");
-        assert_eq!(reread.steps[0].warnings, vec!["narrative truncated".to_string()]);
+        assert_eq!(
+            reread.steps[0].warnings,
+            vec!["narrative truncated".to_string()]
+        );
         assert_eq!(reread.steps[0].cache_read_tokens, Some(6_600));
         assert_eq!(reread.steps[0].cache_write_tokens, None);
         std::fs::remove_dir_all(&dir).ok();
@@ -349,14 +400,21 @@ mod tests {
     #[test]
     fn record_step_records_none_cache_tokens() {
         // The scrape/script path (unchanged signature) must record None for both cache fields.
-        let dir = std::env::temp_dir().join(format!("lodestar-runner-nocache-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("lodestar-runner-nocache-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("checks")).unwrap();
         let vault = dir.to_str().unwrap().to_string();
         open_run(&vault);
 
         record_step(
-            &vault, "2026-06-17-0001",
-            StepIdentity::new("careers-scrape", "scrape", "stripe", "2026-06-23T10:00:00".to_string()),
+            &vault,
+            "2026-06-17-0001",
+            StepIdentity::new(
+                "careers-scrape",
+                "scrape",
+                "stripe",
+                "2026-06-23T10:00:00".to_string(),
+            ),
             StepOutcome::ok(Some(5)),
         )
         .unwrap();
@@ -377,8 +435,14 @@ mod tests {
         open_run(&vault);
 
         record_step(
-            &vault, "2026-06-17-0001",
-            StepIdentity::new("careers-scrape", "scrape", "stripe", "2026-06-21T10:00:00".to_string()),
+            &vault,
+            "2026-06-17-0001",
+            StepIdentity::new(
+                "careers-scrape",
+                "scrape",
+                "stripe",
+                "2026-06-21T10:00:00".to_string(),
+            ),
             StepOutcome::ok(Some(5)),
         )
         .unwrap();

@@ -56,7 +56,7 @@ fn read_domains(vault_path: &str) -> Result<Vec<Domain>, String> {
 #[tauri::command]
 pub fn list_domains(vault_path: String) -> Result<Vec<Domain>, String> {
     let mut out = read_domains(&vault_path)?;
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
@@ -88,7 +88,10 @@ mod tests {
         let d = parse_domain("financial_services", SAMPLE).unwrap();
         assert_eq!(d.slug, "financial_services");
         assert_eq!(d.name, "Financial Services");
-        assert_eq!(d.aliases, vec!["Fintech".to_string(), "Banking".to_string()]);
+        assert_eq!(
+            d.aliases,
+            vec!["Fintech".to_string(), "Banking".to_string()]
+        );
         assert_eq!(d.screening, None);
     }
 
@@ -121,7 +124,10 @@ mod tests {
         assert_eq!(names, vec!["Crypto / Web3", "Financial Services", "iot"]);
 
         let map = screening_map(&vault);
-        assert_eq!(map.get("crypto_web3").map(String::as_str), Some("dealbreaker"));
+        assert_eq!(
+            map.get("crypto_web3").map(String::as_str),
+            Some("dealbreaker")
+        );
         assert_eq!(map.get("financial_services"), None);
         assert_eq!(map.len(), 1);
 

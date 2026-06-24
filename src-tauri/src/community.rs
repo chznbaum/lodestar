@@ -73,9 +73,16 @@ mod tests {
         assert_eq!(c.end_date.as_deref(), Some("2023-08"));
         assert_eq!(
             c.relevance_tags,
-            vec!["technical_education".to_string(), "community_building".to_string(), "leadership".to_string()]
+            vec![
+                "technical_education".to_string(),
+                "community_building".to_string(),
+                "leadership".to_string()
+            ]
         );
-        assert!(c.body.contains("Hampton Roads community"), "body must be captured");
+        assert!(
+            c.body.contains("Hampton Roads community"),
+            "body must be captured"
+        );
     }
 
     #[test]
@@ -95,7 +102,12 @@ mod tests {
         .unwrap();
         let got = list_community(dir.to_str().unwrap()).unwrap();
         std::fs::remove_dir_all(&dir).ok();
-        assert_eq!(got.len(), 1, "_template must be skipped; got {} entries", got.len());
+        assert_eq!(
+            got.len(),
+            1,
+            "_template must be skipped; got {} entries",
+            got.len()
+        );
         assert_eq!(got[0].organization, "Real Org");
     }
 

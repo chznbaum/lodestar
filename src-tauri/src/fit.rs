@@ -162,11 +162,7 @@ pub(crate) fn seniority_fit(
 /// `coverage(list) = matched*100/len` (integer, 0–100).
 /// Required dominates: `(80*req_cov + 20*pref_cov)/100`.
 /// Both empty → 50 (neutral); one empty → the other's coverage.
-pub(crate) fn skills_fit(
-    required: &[String],
-    preferred: &[String],
-    idx: &CompetencyIndex,
-) -> i64 {
+pub(crate) fn skills_fit(required: &[String], preferred: &[String], idx: &CompetencyIndex) -> i64 {
     let coverage = |list: &[String]| -> i64 {
         if list.is_empty() {
             return 0; // sentinel; callers check emptiness before using
@@ -190,11 +186,13 @@ pub(crate) fn skills_fit(
 /// Otherwise → 50 (neutral).
 pub(crate) fn comp_fit(high: Option<i64>, floor: Option<i64>, target: Option<i64>) -> i64 {
     match (high, floor, target) {
-        (Some(h), Some(f), Some(t)) if t > f => {
-            ((h - f) * 100 / (t - f)).clamp(0, 100)
-        }
+        (Some(h), Some(f), Some(t)) if t > f => ((h - f) * 100 / (t - f)).clamp(0, 100),
         (Some(h), Some(f), _) => {
-            if h >= f { 100 } else { 0 }
+            if h >= f {
+                100
+            } else {
+                0
+            }
         }
         _ => 50,
     }
@@ -289,11 +287,7 @@ pub fn score_fit(
 /// Returns all fired flags for the given job/profile pair.
 /// `company_screening` is the company's derived screening value
 /// (`"dealbreaker"` | `"caution"` | `None`).
-pub fn hard_filters(
-    job: &Job,
-    p: &TargetCriteria,
-    company_screening: Option<&str>,
-) -> Vec<Flag> {
+pub fn hard_filters(job: &Job, p: &TargetCriteria, company_screening: Option<&str>) -> Vec<Flag> {
     let mut flags: Vec<Flag> = Vec::new();
 
     // Convenience: is this a non-remote (onsite or hybrid) role?
@@ -316,13 +310,16 @@ pub fn hard_filters(
     // require sponsorship is eligibility genuinely unknown → skip.
     if non_remote && (!p.work_authorization.is_empty() || p.requires_sponsorship) {
         let authorized = !job.countries.is_empty()
-            && job.countries.iter().any(|c| p.work_authorization.contains(c));
+            && job
+                .countries
+                .iter()
+                .any(|c| p.work_authorization.contains(c));
 
         // Needs sponsorship when:
         //   - role's country is known and candidate is not authorized, OR
         //   - country unknown but candidate broadly requires sponsorship (they've told us).
-        let needs_sponsorship = !authorized
-            && (!job.countries.is_empty() || p.requires_sponsorship);
+        let needs_sponsorship =
+            !authorized && (!job.countries.is_empty() || p.requires_sponsorship);
 
         if needs_sponsorship && job.visa_sponsorship.as_deref() == Some("not_offered") {
             flags.push(db(
@@ -345,10 +342,7 @@ pub fn hard_filters(
         let is_local = home.is_some_and(|h| job.metros.iter().any(|m| m == h));
 
         if !is_local {
-            let on_accept_list = job
-                .metros
-                .iter()
-                .any(|m| p.preferred_locations.contains(m));
+            let on_accept_list = job.metros.iter().any(|m| p.preferred_locations.contains(m));
             let ok = job.relocation.as_deref() == Some("offered")
                 && p.open_to_relocation
                 && on_accept_list;
@@ -372,10 +366,7 @@ pub fn hard_filters(
             let same_ccy = job.comp_currency.is_none()
                 || job.comp_currency.as_deref() == p.comp_currency.as_deref();
             // Unknown period → assume annual (recall-safe: flag only on known-annual mismatch).
-            let annual = job
-                .comp_period
-                .as_deref()
-                .is_none_or(|x| x == "annual");
+            let annual = job.comp_period.as_deref().is_none_or(|x| x == "annual");
 
             if same_ccy && annual && high < floor {
                 flags.push(db(
@@ -508,7 +499,9 @@ mod tests {
         };
         let flags = hard_filters(&job, &profile, None);
         assert!(
-            flags.iter().any(|f| f.check == "work_authorization" && f.level == FlagLevel::Dealbreaker),
+            flags
+                .iter()
+                .any(|f| f.check == "work_authorization" && f.level == FlagLevel::Dealbreaker),
             "expected work_authorization dealbreaker, got: {flags:?}"
         );
     }
@@ -588,7 +581,9 @@ mod tests {
         };
         let flags = hard_filters(&job, &profile, None);
         assert!(
-            flags.iter().any(|f| f.check == "work_authorization" && f.level == FlagLevel::Dealbreaker),
+            flags
+                .iter()
+                .any(|f| f.check == "work_authorization" && f.level == FlagLevel::Dealbreaker),
             "requires_sponsorship + not_offered + empty auth list should fire, got: {flags:?}"
         );
     }
@@ -609,7 +604,9 @@ mod tests {
         };
         let flags = hard_filters(&job, &profile, None);
         assert!(
-            flags.iter().any(|f| f.check == "relocation" && f.level == FlagLevel::Dealbreaker),
+            flags
+                .iter()
+                .any(|f| f.check == "relocation" && f.level == FlagLevel::Dealbreaker),
             "expected relocation dealbreaker, got: {flags:?}"
         );
     }
@@ -692,7 +689,9 @@ mod tests {
         };
         let flags = hard_filters(&job, &profile, None);
         assert!(
-            flags.iter().any(|f| f.check == "comp_floor" && f.level == FlagLevel::Dealbreaker),
+            flags
+                .iter()
+                .any(|f| f.check == "comp_floor" && f.level == FlagLevel::Dealbreaker),
             "expected comp_floor dealbreaker, got: {flags:?}"
         );
     }
@@ -753,7 +752,12 @@ mod tests {
     fn seniority_exact_match_in_targets() {
         // "senior" in [senior, dept-head] → 100
         assert_eq!(
-            seniority_fit(Some("senior"), &["senior".into(), "dept-head".into()], None, 0),
+            seniority_fit(
+                Some("senior"),
+                &["senior".into(), "dept-head".into()],
+                None,
+                0
+            ),
             100
         );
     }
@@ -762,7 +766,12 @@ mod tests {
     fn seniority_exact_match_mgmt() {
         // "dept-head" in [senior, dept-head] → 100
         assert_eq!(
-            seniority_fit(Some("dept-head"), &["senior".into(), "dept-head".into()], None, 0),
+            seniority_fit(
+                Some("dept-head"),
+                &["senior".into(), "dept-head".into()],
+                None,
+                0
+            ),
             100
         );
     }
@@ -770,10 +779,7 @@ mod tests {
     #[test]
     fn seniority_within_track_dist1_is_60() {
         // "mid" vs [senior] → IC track, dist 1 → 60
-        assert_eq!(
-            seniority_fit(Some("mid"), &["senior".into()], None, 0),
-            60
-        );
+        assert_eq!(seniority_fit(Some("mid"), &["senior".into()], None, 0), 60);
     }
 
     #[test]
@@ -797,10 +803,7 @@ mod tests {
     #[test]
     fn seniority_unknown_level_is_50() {
         // unknown level → 50
-        assert_eq!(
-            seniority_fit(None, &["senior".into()], None, 0),
-            50
-        );
+        assert_eq!(seniority_fit(None, &["senior".into()], None, 0), 50);
     }
 
     #[test]
@@ -854,10 +857,7 @@ mod tests {
     #[test]
     fn skills_all_required_matched_no_preferred_is_100() {
         let idx = rust_idx();
-        assert_eq!(
-            skills_fit(&["rust".into()], &[], &idx),
-            100
-        );
+        assert_eq!(skills_fit(&["rust".into()], &[], &idx), 100);
     }
 
     #[test]
@@ -915,7 +915,11 @@ mod tests {
     #[test]
     fn domain_avoid_hit_is_0() {
         assert_eq!(
-            domain_fit(&["gambling".into()], &["dev_tools".into()], &["gambling".into()]),
+            domain_fit(
+                &["gambling".into()],
+                &["dev_tools".into()],
+                &["gambling".into()]
+            ),
             0
         );
     }

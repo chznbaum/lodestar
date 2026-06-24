@@ -139,7 +139,9 @@ fn check_path(vault_path: &str, id: &str) -> Result<PathBuf, String> {
     if id.is_empty() || id.contains(['/', '\\']) || id.starts_with('.') {
         return Err(format!("invalid check id {id:?}"));
     }
-    Ok(Path::new(vault_path).join("checks").join(format!("{id}.md")))
+    Ok(Path::new(vault_path)
+        .join("checks")
+        .join(format!("{id}.md")))
 }
 
 pub fn write_check(vault_path: &str, check: &Check) -> Result<(), String> {
@@ -320,9 +322,48 @@ mod tests {
     fn summary_tallies_credits_and_usd_by_class() {
         let mut c = empty_run("2026-06-18-0001");
         c.steps = vec![
-            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(25), cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
-            Step { stage: "structure-listings".into(), class: "llm".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: Some(500_000), cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] }, // $0.50 in micro-dollars
-            Step { stage: "pre-filter".into(), class: "script".into(), target: "x".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
+            Step {
+                stage: "careers-scrape".into(),
+                class: "scrape".into(),
+                target: "x".into(),
+                status: "ok".into(),
+                attempts: 1,
+                started_at: None,
+                finished_at: None,
+                error: None,
+                cost: Some(25),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                warnings: vec![],
+            },
+            Step {
+                stage: "structure-listings".into(),
+                class: "llm".into(),
+                target: "x".into(),
+                status: "ok".into(),
+                attempts: 1,
+                started_at: None,
+                finished_at: None,
+                error: None,
+                cost: Some(500_000),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                warnings: vec![],
+            }, // $0.50 in micro-dollars
+            Step {
+                stage: "pre-filter".into(),
+                class: "script".into(),
+                target: "x".into(),
+                status: "ok".into(),
+                attempts: 1,
+                started_at: None,
+                finished_at: None,
+                error: None,
+                cost: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                warnings: vec![],
+            },
         ];
         let s = CheckSummary::from(&c);
         assert_eq!(s.credits, 25); // scrape steps only
@@ -341,12 +382,42 @@ mod tests {
         newer.started_at = Some("2026-06-17T09:00:00".into());
         newer.roles_found = 3;
         newer.steps = vec![
-            Step { stage: "careers-scrape".into(), class: "scrape".into(), target: "stripe".into(), status: "ok".into(), attempts: 1, started_at: None, finished_at: None, error: None, cost: None, cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
-            Step { stage: "jd-scrape".into(), class: "scrape".into(), target: "x".into(), status: "failed".into(), attempts: 2, started_at: None, finished_at: None, error: Some("timeout".into()), cost: None, cache_read_tokens: None, cache_write_tokens: None, warnings: vec![] },
+            Step {
+                stage: "careers-scrape".into(),
+                class: "scrape".into(),
+                target: "stripe".into(),
+                status: "ok".into(),
+                attempts: 1,
+                started_at: None,
+                finished_at: None,
+                error: None,
+                cost: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                warnings: vec![],
+            },
+            Step {
+                stage: "jd-scrape".into(),
+                class: "scrape".into(),
+                target: "x".into(),
+                status: "failed".into(),
+                attempts: 2,
+                started_at: None,
+                finished_at: None,
+                error: Some("timeout".into()),
+                cost: None,
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                warnings: vec![],
+            },
         ];
         write_check(&vault, &older).unwrap();
         write_check(&vault, &newer).unwrap();
-        std::fs::write(dir.join("checks").join("_draft.md"), render_check_note(&older)).unwrap(); // skipped
+        std::fs::write(
+            dir.join("checks").join("_draft.md"),
+            render_check_note(&older),
+        )
+        .unwrap(); // skipped
 
         let list = list_checks(vault).unwrap();
         let ids: Vec<_> = list.iter().map(|c| c.slug.as_str()).collect();

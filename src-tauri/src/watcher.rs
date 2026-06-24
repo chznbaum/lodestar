@@ -55,7 +55,10 @@ impl WatcherState {
 pub fn classify_change(changed: &Path) -> Option<(&'static str, String)> {
     let slug = note_slug(changed.file_name()?.to_str()?)?;
     let parent = changed.parent()?.file_name()?.to_str()?;
-    let kind = WATCHED.iter().find(|(dir, _)| *dir == parent).map(|(_, k)| *k)?;
+    let kind = WATCHED
+        .iter()
+        .find(|(dir, _)| *dir == parent)
+        .map(|(_, k)| *k)?;
     Some((kind, slug))
 }
 
@@ -91,7 +94,13 @@ pub fn start_vault_watcher(
                 if !seen.insert((kind, slug.clone())) {
                     continue;
                 }
-                let _ = emitter.emit("record:changed", RecordChanged { kind: kind.to_string(), slug });
+                let _ = emitter.emit(
+                    "record:changed",
+                    RecordChanged {
+                        kind: kind.to_string(),
+                        slug,
+                    },
+                );
             }
         }
     })
@@ -103,7 +112,9 @@ pub fn start_vault_watcher(
     for (dir, _) in WATCHED {
         let p = base.join(dir);
         std::fs::create_dir_all(&p).map_err(|e| format!("ensure {p:?}: {e}"))?;
-        debouncer.watch(&p, RecursiveMode::NonRecursive).map_err(|e| e.to_string())?;
+        debouncer
+            .watch(&p, RecursiveMode::NonRecursive)
+            .map_err(|e| e.to_string())?;
     }
 
     *state.0.lock().map_err(|e| e.to_string())? = Some(debouncer);

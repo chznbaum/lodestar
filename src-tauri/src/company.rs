@@ -107,7 +107,9 @@ pub fn validate_status(status: &str) -> Result<(), String> {
     if STATUSES.contains(&status) {
         Ok(())
     } else {
-        Err(format!("unknown status {status:?}; expected one of {STATUSES:?}"))
+        Err(format!(
+            "unknown status {status:?}; expected one of {STATUSES:?}"
+        ))
     }
 }
 
@@ -241,7 +243,7 @@ pub fn list_companies(vault_path: String) -> Result<Vec<Company>, String> {
             Err(e) => eprintln!("skip {slug}: {e}"),
         }
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
@@ -476,9 +478,17 @@ mod tests {
         // second create at the same slug must error, not overwrite
         let dup = NewCompany {
             name: "Beta Co".into(),
-            website: None, careers_url: None, domain: vec![], business_model: vec![],
-            domain_raw: None, company_size: None, stage: None, remote_policy: None,
-            location: None, source: None, notes: String::new(),
+            website: None,
+            careers_url: None,
+            domain: vec![],
+            business_model: vec![],
+            domain_raw: None,
+            company_size: None,
+            stage: None,
+            remote_policy: None,
+            location: None,
+            source: None,
+            notes: String::new(),
         };
         assert!(create_company(vault, dup).is_err());
 
@@ -513,7 +523,13 @@ mod tests {
         .unwrap();
         // Free text with YAML-special chars round-trips exactly (the corruption case).
         let tricky = "remote: US/EU; \"flexible\" [see careers]";
-        let c = update_company_field(vault.clone(), "acme".into(), "location".into(), tricky.into()).unwrap();
+        let c = update_company_field(
+            vault.clone(),
+            "acme".into(),
+            "location".into(),
+            tricky.into(),
+        )
+        .unwrap();
         assert_eq!(c.location.as_deref(), Some(tricky));
         let reread = parse_company(
             "acme",
@@ -524,7 +540,13 @@ mod tests {
         .unwrap();
         assert_eq!(reread.location.as_deref(), Some(tricky));
         // A list field can't be written through the scalar setter.
-        assert!(update_company_field(vault.clone(), "acme".into(), "domain".into(), "fintech".into()).is_err());
+        assert!(update_company_field(
+            vault.clone(),
+            "acme".into(),
+            "domain".into(),
+            "fintech".into()
+        )
+        .is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -539,10 +561,22 @@ mod tests {
         )
         .unwrap();
         let domains = vec!["fintech".to_string(), "ai, ml".to_string()];
-        let c = set_company_list_field(vault.clone(), "acme".into(), "domain".into(), domains.clone()).unwrap();
+        let c = set_company_list_field(
+            vault.clone(),
+            "acme".into(),
+            "domain".into(),
+            domains.clone(),
+        )
+        .unwrap();
         assert_eq!(c.domain, domains);
         // A non-list field is rejected.
-        assert!(set_company_list_field(vault.clone(), "acme".into(), "name".into(), vec!["x".into()]).is_err());
+        assert!(set_company_list_field(
+            vault.clone(),
+            "acme".into(),
+            "name".into(),
+            vec!["x".into()]
+        )
+        .is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -565,15 +599,17 @@ mod tests {
         assert_eq!(cs.len(), 179, "all real company notes should parse");
         assert!(cs.iter().any(|c| c.slug == "stripe" && c.name == "Stripe"));
         let names: Vec<_> = cs.iter().map(|c| c.name.to_lowercase()).collect();
-        assert!(names.windows(2).all(|w| w[0] <= w[1]), "should be name-sorted");
+        assert!(
+            names.windows(2).all(|w| w[0] <= w[1]),
+            "should be name-sorted"
+        );
     }
 
     #[test]
     #[ignore = "reads a real note; run with LODESTAR_VAULT set"]
     fn set_field_preserves_real_note() {
         let vault = std::env::var("LODESTAR_VAULT").expect("set LODESTAR_VAULT");
-        let text =
-            std::fs::read_to_string(format!("{vault}/companies/stripe.md")).unwrap();
+        let text = std::fs::read_to_string(format!("{vault}/companies/stripe.md")).unwrap();
         let before = parse_company("stripe", &text, d("2026-06-15"), &HashMap::new()).unwrap();
         let out = set_frontmatter_field(&text, "status", "paused").unwrap();
         let after = parse_company("stripe", &out, d("2026-06-15"), &HashMap::new()).unwrap();

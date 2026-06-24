@@ -130,11 +130,26 @@ fn spawn_drain(
     std::thread::spawn(move || {
         let scraper = ScrapingBeeScraper;
         let llm = OpenRouterLlm;
-        let sink = TauriSink { app, cancelled: cancelled.clone() };
-        let is_cancelled =
-            move |rid: &str| cancelled.lock().map(|set| set.contains(rid)).unwrap_or(false);
+        let sink = TauriSink {
+            app,
+            cancelled: cancelled.clone(),
+        };
+        let is_cancelled = move |rid: &str| {
+            cancelled
+                .lock()
+                .map(|set| set.contains(rid))
+                .unwrap_or(false)
+        };
         loop {
-            match pump_once(&*queue, &vault_path, &cfg, &scraper, &llm, &sink, &is_cancelled) {
+            match pump_once(
+                &*queue,
+                &vault_path,
+                &cfg,
+                &scraper,
+                &llm,
+                &sink,
+                &is_cancelled,
+            ) {
                 Ok(true) => continue,
                 Ok(false) => break, // queue drained
                 Err(e) => {
@@ -208,6 +223,10 @@ pub fn rescore_job(
 /// Mark a run cancelled — the drain skips its remaining tasks without dispatching them.
 #[tauri::command]
 pub fn cancel_run(state: State<'_, PipelineState>, run_id: String) -> Result<(), String> {
-    state.cancelled.lock().map_err(|e| e.to_string())?.insert(run_id);
+    state
+        .cancelled
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(run_id);
     Ok(())
 }

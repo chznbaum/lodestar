@@ -116,10 +116,7 @@ pub fn get_config(app: tauri::AppHandle) -> Result<PipelineConfig, String> {
 }
 
 #[tauri::command]
-pub fn set_config(
-    app: tauri::AppHandle,
-    config: PipelineConfig,
-) -> Result<PipelineConfig, String> {
+pub fn set_config(app: tauri::AppHandle, config: PipelineConfig) -> Result<PipelineConfig, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     save_config(&dir, &config)?;
     Ok(config)

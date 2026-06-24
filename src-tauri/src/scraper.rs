@@ -203,10 +203,17 @@ impl Scraper for ScrapingBeeScraper {
         if !status.is_success() {
             let status_u16 = status.as_u16();
             let class = classify_scrape_failure(status_u16, &body);
-            return Err(ScrapeError { status: Some(status_u16), body, class });
+            return Err(ScrapeError {
+                status: Some(status_u16),
+                body,
+                class,
+            });
         }
 
-        Ok(ScrapeResult { content: body, credits })
+        Ok(ScrapeResult {
+            content: body,
+            credits,
+        })
     }
 }
 
@@ -221,7 +228,10 @@ pub mod tests {
     }
     impl Scraper for FakeScraper {
         fn fetch(&self, _url: &str, _tier: ProxyTier) -> Result<ScrapeResult, ScrapeError> {
-            Ok(ScrapeResult { content: self.content.clone(), credits: Some(self.credits) })
+            Ok(ScrapeResult {
+                content: self.content.clone(),
+                credits: Some(self.credits),
+            })
         }
     }
 
@@ -242,8 +252,13 @@ pub mod tests {
 
     #[test]
     fn fake_returns_canned_content_and_credits() {
-        let s = FakeScraper { content: "<p>x</p>".into(), credits: 5 };
-        let r = s.fetch("https://acme.com/careers", ProxyTier::Premium).unwrap();
+        let s = FakeScraper {
+            content: "<p>x</p>".into(),
+            credits: 5,
+        };
+        let r = s
+            .fetch("https://acme.com/careers", ProxyTier::Premium)
+            .unwrap();
         assert_eq!(r.content, "<p>x</p>");
         assert_eq!(r.credits, Some(5));
     }
@@ -280,14 +295,35 @@ pub mod tests {
         let raw = "https://example.com/jobs?location=New+York&type=full-time";
         let encoded = percent_encode_target_url(raw);
         // `+` must become `%2B`, `?` → `%3F`, `&` → `%26`, `=` → `%3D`
-        assert!(encoded.contains("%2B"), "'+' must be encoded as '%2B', got: {encoded}");
-        assert!(encoded.contains("%3F"), "'?' must be encoded as '%3F', got: {encoded}");
-        assert!(encoded.contains("%26"), "'&' must be encoded as '%26', got: {encoded}");
-        assert!(encoded.contains("%3D"), "'=' must be encoded as '%3D', got: {encoded}");
-        assert!(!encoded.contains('+'), "bare '+' must not remain, got: {encoded}");
-        assert!(!encoded.contains('?'), "bare '?' must not remain, got: {encoded}");
+        assert!(
+            encoded.contains("%2B"),
+            "'+' must be encoded as '%2B', got: {encoded}"
+        );
+        assert!(
+            encoded.contains("%3F"),
+            "'?' must be encoded as '%3F', got: {encoded}"
+        );
+        assert!(
+            encoded.contains("%26"),
+            "'&' must be encoded as '%26', got: {encoded}"
+        );
+        assert!(
+            encoded.contains("%3D"),
+            "'=' must be encoded as '%3D', got: {encoded}"
+        );
+        assert!(
+            !encoded.contains('+'),
+            "bare '+' must not remain, got: {encoded}"
+        );
+        assert!(
+            !encoded.contains('?'),
+            "bare '?' must not remain, got: {encoded}"
+        );
         // RFC-3986 unreserved chars `-._~` must NOT be percent-encoded (Fix 2).
         let unreserved = percent_encode_target_url("a-b.c_d~e");
-        assert_eq!(unreserved, "a-b.c_d~e", "RFC-3986 unreserved chars must pass through unchanged, got: {unreserved}");
+        assert_eq!(
+            unreserved, "a-b.c_d~e",
+            "RFC-3986 unreserved chars must pass through unchanged, got: {unreserved}"
+        );
     }
 }

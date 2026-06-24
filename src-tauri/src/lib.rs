@@ -33,7 +33,9 @@ pub fn run() {
             let queue = pipeline::queue::SqliteQueue::open(&dir.join("queue.db"))?;
             app.manage(worker::PipelineState {
                 queue: std::sync::Arc::new(queue),
-                cancelled: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+                cancelled: std::sync::Arc::new(std::sync::Mutex::new(
+                    std::collections::HashSet::new(),
+                )),
             });
             // The vault file-watcher is started by the frontend (it owns the vault path) via
             // `start_vault_watcher`; park an empty slot for its handle here.

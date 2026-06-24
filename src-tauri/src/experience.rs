@@ -54,7 +54,11 @@ fn parse_experience(slug: &str, text: &str) -> Result<Experience, String> {
         .is_current
         .unwrap_or_else(|| end_date.as_deref().is_none_or(|s| s.trim().is_empty()));
 
-    let competencies = f.competencies.iter().map(|c| note::strip_wikilink(c)).collect();
+    let competencies = f
+        .competencies
+        .iter()
+        .map(|c| note::strip_wikilink(c))
+        .collect();
 
     Ok(Experience {
         slug: slug.to_string(),
@@ -198,8 +202,14 @@ mod tests {
         let text = "---\ncompany: MAXX Potential\nrole_title: Site Lead\nstart_date: 2018-01\nend_date: 2022-01\n---\n## Summary\nLed a Norfolk office of 8 concurrent teams.\n\n## Progression\nApprentice → Site Lead.\n";
         let exp = parse_experience("maxx-site-lead", text).unwrap();
         assert_eq!(exp.role_title, "Site Lead");
-        assert!(exp.body.contains("## Summary"), "body missing Summary: {:?}", exp.body);
-        assert!(exp.body.contains("Led a Norfolk office of 8 concurrent teams."));
+        assert!(
+            exp.body.contains("## Summary"),
+            "body missing Summary: {:?}",
+            exp.body
+        );
+        assert!(exp
+            .body
+            .contains("Led a Norfolk office of 8 concurrent teams."));
         assert!(exp.body.contains("## Progression"));
     }
 
@@ -211,10 +221,7 @@ mod tests {
         let today = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
         let yoe = total_years_experience(&exps, today);
         // 2018-01-01 to 2025-01-01 = exactly 7 years
-        assert!(
-            (yoe - 7.0).abs() < 0.05,
-            "expected ~7.0 yoe, got {yoe:.4}"
-        );
+        assert!((yoe - 7.0).abs() < 0.05, "expected ~7.0 yoe, got {yoe:.4}");
     }
 
     #[test]
