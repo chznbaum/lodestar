@@ -1,5 +1,15 @@
 # Lodestar
 
+> *Job hunting is a numbers game. Lodestar lets you play it without phoning it in.*
+
+[![CI](https://github.com/chznbaum/lodestar/actions/workflows/ci.yml/badge.svg)](https://github.com/chznbaum/lodestar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-000000?logo=apple&logoColor=white)](#status)
+[![Status: early development](https://img.shields.io/badge/status-early%20development-orange)](#status)
+[![Tauri v2](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Svelte 5](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev/)
+
 A local-first desktop **job-search workbench**. Lodestar scrapes company career pages,
 extracts structured role data with LLMs, and scores each role against your profile — so you can
 run a high-volume application pipeline without losing the thread.
